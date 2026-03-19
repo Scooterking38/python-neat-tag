@@ -1,25 +1,24 @@
 [NEAT]
-pop_size              = 20
-fitness_criterion     = max
-fitness_threshold     = 100
-reset_on_extinction   = False
+pop_size = 10
+fitness_criterion = max
+fitness_threshold = 10
+reset_on_extinction = False
 
 [DefaultGenome]
-num_inputs            = 2
-num_outputs           = 2
-num_hidden            = 0
-initial_connection    = full
-
-activation_default    = tanh
-aggregation_default   = sum
+num_inputs = 2
+num_outputs = 4
+num_hidden = 0
+initial_connection = full
+activation_default = tanh
+aggregation_default = sum
 
 [DefaultSpeciesSet]
 compatibility_threshold = 3.0
 
 [DefaultStagnation]
-max_stagnation       = 10
-species_elitism      = 1
+max_stagnation = 10
+species_elitism = 1
 
 [DefaultReproduction]
-elitism            = 1
+elitism = 1
 survival_threshold = 0.2
