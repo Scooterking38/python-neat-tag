@@ -9,7 +9,7 @@ import math
 CELL_SIZE = 20
 GRID_WIDTH = 30
 GRID_HEIGHT = 20
-MAX_STEPS = 20000
+MAX_STEPS = 20
 OPPONENTS = 5  # number of opponents sampled per genome
 
 SAVE_DIR = "best_genomes"
