@@ -1,16 +1,18 @@
-name: Run NEAT Tag Simulation
+name: Train NEAT Tag Simulation
 
 on:
   push:
   workflow_dispatch:
 
 jobs:
-  run-simulation:
+  train-simulation:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true  # needed to push back
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -26,22 +28,21 @@ jobs:
       - name: Set SDL to dummy (headless mode)
         run: echo "SDL_VIDEODRIVER=dummy" >> $GITHUB_ENV
 
-      - name: Run simulation
+      - name: Run training
         run: python main.py
 
-      # Upload best genomes
-      - name: Upload best genomes
+      # Commit & push updated best genomes
+      - name: Commit and push best genomes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add best_genomes/
+          git diff --quiet || git commit -m "Update best genomes [skip ci]"
+          git push origin HEAD:${{ github.ref }}
+
+      # Optional: Upload artifacts
+      - name: Upload best genomes as artifact
         uses: actions/upload-artifact@v4
         with:
           name: neat-best-genomes
           path: best_genomes/
-
-      # OPTIONAL: if you later generate video/gif
-      - name: Upload simulation video
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: simulation-output
-          path: |
-            *.mp4
-            *.gif
