@@ -1,7 +1,10 @@
 name: Generate NEAT Simulation Video
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # manual trigger
+  push:
+    paths:
+      - "best_genomes/**"  # triggers when any file in the folder changes
 
 jobs:
   generate-video:
