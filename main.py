@@ -1,83 +1,99 @@
 import os
+import random
+import pickle
 import pygame
 import neat
-import imageio
-import time
+import math
 
-# ----------- SETTINGS -----------
+# -------- SETTINGS --------
 CELL_SIZE = 20
 GRID_WIDTH = 30
 GRID_HEIGHT = 20
-FPS_DELAY = 10  # ms per step
-TARGET_POS = (15, 10)  # grid target
-MAX_STEPS = 20  # ~3 mins at 10ms per step
+MAX_STEPS = 200
 
-# Create folder for frames
-FRAME_DIR = "frames"
-os.makedirs(FRAME_DIR, exist_ok=True)
+SAVE_DIR = "best_genomes"
+os.makedirs(SAVE_DIR, exist_ok=True)
 
-# ----------- PYGAME HEADLESS -----------
 pygame.init()
 win = pygame.Surface((GRID_WIDTH * CELL_SIZE, GRID_HEIGHT * CELL_SIZE))
 
-# ----------- EVAL FUNCTION -----------
-def eval_genomes(genomes, config):
-    frame_counter = 0
-    start_time = time.time()
+# -------- HELPER --------
+def distance(a, b):
+    return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
-    for _, genome in genomes:
-        genome.fitness = 0  # ALWAYS set first
 
-    for _, genome in genomes:
-        # Global timeout check
-        if time.time() - start_time > 180:
-            print("Time limit reached, stopping evaluation early")
-            break
+def move(pos, direction):
+    x, y = pos
+    if direction == 0: y -= 1
+    elif direction == 1: y += 1
+    elif direction == 2: x -= 1
+    elif direction == 3: x += 1
 
-        net = neat.nn.FeedForwardNetwork.create(genome, config)
+    x = max(0, min(GRID_WIDTH - 1, x))
+    y = max(0, min(GRID_HEIGHT - 1, y))
+    return x, y
 
-        gx, gy = 0, 0
 
-        for step in range(MAX_STEPS):
-            dx = (TARGET_POS[0] - gx) / (GRID_WIDTH - 1)
-            dy = (TARGET_POS[1] - gy) / (GRID_HEIGHT - 1)
+# -------- EVALUATION --------
+def eval_genomes(genomes1, genomes2, config1, config2):
+    for _, g in genomes1:
+        g.fitness = 0
+    for _, g in genomes2:
+        g.fitness = 0
 
-            output = net.activate((dx, dy))
-            direction = output.index(max(output))
+    for _, g1 in genomes1:
+        net1 = neat.nn.FeedForwardNetwork.create(g1, config1)
 
-            if direction == 0:
-                gy -= 1
-            elif direction == 1:
-                gy += 1
-            elif direction == 2:
-                gx -= 1
-            elif direction == 3:
-                gx += 1
+        for _, g2 in genomes2:
+            net2 = neat.nn.FeedForwardNetwork.create(g2, config2)
 
-            gx = max(0, min(GRID_WIDTH - 1, gx))
-            gy = max(0, min(GRID_HEIGHT - 1, gy))
+            # random start positions
+            pos1 = (random.randint(0, GRID_WIDTH-1), random.randint(0, GRID_HEIGHT-1))
+            pos2 = (random.randint(0, GRID_WIDTH-1), random.randint(0, GRID_HEIGHT-1))
 
-            dist = abs(TARGET_POS[0] - gx) + abs(TARGET_POS[1] - gy)
-            genome.fitness += 1 / (dist + 1)
+            for step in range(MAX_STEPS):
+                dx = (pos2[0] - pos1[0]) / GRID_WIDTH
+                dy = (pos2[1] - pos1[1]) / GRID_HEIGHT
 
-            # Drawing (unchanged)
-            win.fill((0, 0, 0))
-            pygame.draw.rect(win, (0, 255, 0),
-                             (TARGET_POS[0]*CELL_SIZE, TARGET_POS[1]*CELL_SIZE, CELL_SIZE, CELL_SIZE))
-            pygame.draw.rect(win, (255, 0, 0),
-                             (gx*CELL_SIZE, gy*CELL_SIZE, CELL_SIZE, CELL_SIZE))
+                # Chaser (green)
+                out1 = net1.activate((dx, dy))
+                move1 = out1.index(max(out1))
 
-            frame_path = os.path.join(FRAME_DIR, f"frame_{frame_counter:05d}.png")
-            pygame.image.save(win, frame_path)
-            frame_counter += 1
+                # Evader (red)
+                out2 = net2.activate((-dx, -dy))
+                move2 = out2.index(max(out2))
 
-            pygame.time.delay(FPS_DELAY)
+                pos1 = move(pos1, move1)
+                pos2 = move(pos2, move2)
 
-# ----------- RUN FUNCTION -----------
+                d = distance(pos1, pos2)
+
+                # Fitness shaping
+                g1.fitness += (1 / (d + 1)) * 2  # closer = better
+                g2.fitness += (d / (GRID_WIDTH + GRID_HEIGHT))  # farther = better
+
+                # Catch condition
+                if d == 0:
+                    g1.fitness += 50
+                    g2.fitness -= 50
+                    break
+
+
+# -------- SAVE BEST --------
+def save_best(pop, name):
+    best = max(pop.population.values(), key=lambda g: g.fitness)
+    path = os.path.join(SAVE_DIR, f"{name}_best.pkl")
+    with open(path, "wb") as f:
+        pickle.dump(best, f)
+    print(f"Saved best {name} genome → {path}")
+
+
+# -------- RUN --------
 def run():
     local_dir = os.path.dirname(__file__)
     config_path = os.path.join(local_dir, "config.txt")
-    config = neat.Config(
+
+    config1 = neat.Config(
         neat.DefaultGenome,
         neat.DefaultReproduction,
         neat.DefaultSpeciesSet,
@@ -85,17 +101,47 @@ def run():
         config_path
     )
 
-    pop = neat.Population(config)
-    pop.run(eval_genomes, 5)  # small generations for demo
+    config2 = neat.Config(
+        neat.DefaultGenome,
+        neat.DefaultReproduction,
+        neat.DefaultSpeciesSet,
+        neat.DefaultStagnation,
+        config_path
+    )
 
-    # Build video
-    video_path = "simulation.mp4"
-    frames = sorted(os.listdir(FRAME_DIR))
-    with imageio.get_writer(video_path, fps=30) as video:
-        for f in frames:
-            video.append_data(imageio.imread(os.path.join(FRAME_DIR, f)))
+    pop1 = neat.Population(config1)  # chaser
+    pop2 = neat.Population(config2)  # evader
 
-    print(f"Video saved to {video_path}")
+    GENERATIONS = 10
+
+    for gen in range(GENERATIONS):
+        print(f"\n--- Generation {gen} ---")
+
+        genomes1 = list(pop1.population.items())
+        genomes2 = list(pop2.population.items())
+
+        eval_genomes(genomes1, genomes2, config1, config2)
+
+        pop1.reporters.post_evaluate(config1, pop1.population, pop1.species, None)
+        pop2.reporters.post_evaluate(config2, pop2.population, pop2.species, None)
+
+        pop1.population = pop1.reproduction.reproduce(
+            config1, pop1.species, config1.pop_size, pop1.generation
+        )
+        pop2.population = pop2.reproduction.reproduce(
+            config2, pop2.species, config2.pop_size, pop2.generation
+        )
+
+        pop1.species.speciate(config1, pop1.population, pop1.generation)
+        pop2.species.speciate(config2, pop2.population, pop2.generation)
+
+        pop1.generation += 1
+        pop2.generation += 1
+
+        # Save best each generation
+        save_best(pop1, "chaser")
+        save_best(pop2, "evader")
+
 
 if __name__ == "__main__":
     run()
