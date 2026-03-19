@@ -1,71 +1,79 @@
+import os
 import pygame
 import neat
-import os
+import imageio
+import time
 
 # ----------- SETTINGS -----------
 CELL_SIZE = 20
-GRID_WIDTH = 30   # 600 / 20
-GRID_HEIGHT = 20  # 400 / 20
-WIN_WIDTH = GRID_WIDTH * CELL_SIZE
-WIN_HEIGHT = GRID_HEIGHT * CELL_SIZE
-FPS_DELAY = 50
-
+GRID_WIDTH = 30
+GRID_HEIGHT = 20
+FPS_DELAY = 10  # ms per step
 TARGET_POS = (15, 10)  # grid target
+MAX_STEPS = 1800  # ~3 mins at 10ms per step
 
-# ----------- PYGAME INIT -----------
+# Create folder for frames
+FRAME_DIR = "frames"
+os.makedirs(FRAME_DIR, exist_ok=True)
+
+# ----------- PYGAME HEADLESS -----------
 pygame.init()
-win = pygame.display.set_mode((WIN_WIDTH, WIN_HEIGHT))
-pygame.display.set_caption("Grid NEAT AI")
+win = pygame.Surface((GRID_WIDTH * CELL_SIZE, GRID_HEIGHT * CELL_SIZE))
 
 # ----------- EVAL FUNCTION -----------
 def eval_genomes(genomes, config):
+    frame_counter = 0
+    start_time = time.time()
+
     for _, genome in genomes:
         net = neat.nn.FeedForwardNetwork.create(genome, config)
         genome.fitness = 0
 
         # Start at random grid position
-        gx = 0
-        gy = 0
+        gx, gy = 0, 0
 
-        for step in range(100):  # steps per genome
-            # event handling
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    pygame.quit()
-                    quit()
+        for step in range(MAX_STEPS):
+            # Stop if ~3 minutes passed
+            if time.time() - start_time > 180:
+                return
 
-            # Inputs: relative position to target, normalized
+            # Inputs: relative position to target
             dx = (TARGET_POS[0] - gx) / (GRID_WIDTH - 1)
             dy = (TARGET_POS[1] - gy) / (GRID_HEIGHT - 1)
             inputs = (dx, dy)
 
-            # Network outputs 4 values for directions
+            # Network outputs 4 values: up, down, left, right
             output = net.activate(inputs)
             direction = output.index(max(output))
 
-            # Move one cell in the chosen direction
-            if direction == 0:  # up
+            # Move one cell
+            if direction == 0:
                 gy -= 1
-            elif direction == 1:  # down
+            elif direction == 1:
                 gy += 1
-            elif direction == 2:  # left
+            elif direction == 2:
                 gx -= 1
-            elif direction == 3:  # right
+            elif direction == 3:
                 gx += 1
 
             # Clamp inside grid
             gx = max(0, min(GRID_WIDTH - 1, gx))
             gy = max(0, min(GRID_HEIGHT - 1, gy))
 
-            # Fitness = closer to target = higher
+            # Fitness: closer to target = higher
             dist = abs(TARGET_POS[0] - gx) + abs(TARGET_POS[1] - gy)
-            genome.fitness += 1 / (dist + 1)  # +1 to avoid division by 0
+            genome.fitness += 1 / (dist + 1)
 
-            # DRAW
+            # Draw on surface
             win.fill((0, 0, 0))
             pygame.draw.rect(win, (0, 255, 0), (TARGET_POS[0]*CELL_SIZE, TARGET_POS[1]*CELL_SIZE, CELL_SIZE, CELL_SIZE))
             pygame.draw.rect(win, (255, 0, 0), (gx*CELL_SIZE, gy*CELL_SIZE, CELL_SIZE, CELL_SIZE))
-            pygame.display.update()
+
+            # Save frame
+            frame_path = os.path.join(FRAME_DIR, f"frame_{frame_counter:05d}.png")
+            pygame.image.save(win, frame_path)
+            frame_counter += 1
+
             pygame.time.delay(FPS_DELAY)
 
 # ----------- RUN FUNCTION -----------
@@ -81,6 +89,16 @@ def run():
     )
 
     pop = neat.Population(config)
-    pop.run(eval_genomes, 20)  # run 20 generations
+    pop.run(eval_genomes, 5)  # small generations for demo
 
-run()
+    # Build video
+    video_path = "simulation.mp4"
+    frames = sorted(os.listdir(FRAME_DIR))
+    with imageio.get_writer(video_path, fps=30) as video:
+        for f in frames:
+            video.append_data(imageio.imread(os.path.join(FRAME_DIR, f)))
+
+    print(f"Video saved to {video_path}")
+
+if __name__ == "__main__":
+    run()
