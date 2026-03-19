@@ -10,7 +10,7 @@ GRID_WIDTH = 30
 GRID_HEIGHT = 20
 FPS_DELAY = 10  # ms per step
 TARGET_POS = (15, 10)  # grid target
-MAX_STEPS = 1800  # ~3 mins at 10ms per step
+MAX_STEPS = 200  # ~3 mins at 10ms per step
 
 # Create folder for frames
 FRAME_DIR = "frames"
