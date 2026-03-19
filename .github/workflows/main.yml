@@ -1,31 +1,47 @@
-name: NEAT Grid Simulation
+name: Run NEAT Tag Simulation
 
 on:
+  push:
   workflow_dispatch:
 
 jobs:
-  train-and-upload:
+  run-simulation:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.11
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pygame neat-python imageio[ffmpeg]
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pygame neat-python imageio[ffmpeg]
 
-    - name: Run training
-      run: |
-        python main.py
+      # Headless pygame fix
+      - name: Set SDL to dummy (headless mode)
+        run: echo "SDL_VIDEODRIVER=dummy" >> $GITHUB_ENV
 
-    - name: Upload video artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: simulation-video
-        path: simulation.mp4
+      - name: Run simulation
+        run: python main.py
+
+      # Upload best genomes
+      - name: Upload best genomes
+        uses: actions/upload-artifact@v4
+        with:
+          name: neat-best-genomes
+          path: best_genomes/
+
+      # OPTIONAL: if you later generate video/gif
+      - name: Upload simulation video
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simulation-output
+          path: |
+            *.mp4
+            *.gif
