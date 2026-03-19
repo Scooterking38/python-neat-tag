@@ -1,11 +1,13 @@
 [NEAT]
+# Population
 pop_size = 10
 fitness_criterion = max
-fitness_threshold = 10
+fitness_threshold = 100.0
 reset_on_extinction = False
 no_fitness_termination = False
 
 [DefaultGenome]
+# network structure
 num_inputs = 2
 num_outputs = 4
 num_hidden = 0
@@ -14,16 +16,25 @@ feed_forward = True
 activation_default = tanh
 aggregation_default = sum
 
-# ---- required for mutation ----
+# mutation rates
 activation_mutate_rate = 0.0
+activation_options = tanh
 weight_mutate_rate = 0.8
 weight_replace_rate = 0.1
+bias_mutate_rate = 0.7
+bias_replace_rate = 0.1
+response_mutate_rate = 0.0
+response_replace_rate = 0.0
+
+# node & connection probabilities
 node_add_prob = 0.2
 node_delete_prob = 0.2
 conn_add_prob = 0.5
 conn_delete_prob = 0.5
+enabled_default = True
+enabled_mutate_rate = 0.01
 
-# ---- required for species compatibility ----
+# compatibility coefficients (species)
 compatibility_disjoint_coefficient = 1.0
 compatibility_weight_coefficient = 0.5
 compatibility_threshold = 3.0
@@ -32,9 +43,10 @@ compatibility_threshold = 3.0
 compatibility_threshold = 3.0
 
 [DefaultStagnation]
-max_stagnation = 10
-species_elitism = 1
+species_fitness_func = max
+max_stagnation = 15
+species_elitism = 2
 
 [DefaultReproduction]
-elitism = 1
+elitism = 2
 survival_threshold = 0.2
