@@ -1,4 +1,4 @@
-name: Train NEAT Tag Simulation
+name: Train NEAT Tag Simulation (Verbose Logging)
 
 on:
   push:
@@ -9,40 +9,69 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1️⃣ Checkout code
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
-          persist-credentials: true  # needed to push back
+          persist-credentials: true  # allow git push
 
+      # 2️⃣ Setup Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      # 3️⃣ Install dependencies
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install pygame neat-python imageio[ffmpeg]
 
-      # Headless pygame fix
+      # 4️⃣ Headless Pygame
       - name: Set SDL to dummy (headless mode)
         run: echo "SDL_VIDEODRIVER=dummy" >> $GITHUB_ENV
 
-      - name: Run training
-        run: python main.py
-
-      # Commit & push updated best genomes
-      - name: Commit and push best genomes
+      # 5️⃣ Ensure best_genomes folder exists
+      - name: Ensure best_genomes folder exists
         run: |
+          echo "Checking if best_genomes folder exists..."
+          mkdir -p best_genomes
+          ls -la best_genomes
+
+      # 6️⃣ Run training
+      - name: Run NEAT training
+        run: |
+          echo "Starting NEAT training..."
+          python main.py 2>&1 | tee training.log
+          echo "Training finished. Contents of best_genomes folder:"
+          ls -la best_genomes
+          echo "Checking if .pkl files exist:"
+          for f in best_genomes/*.pkl; do echo "$f"; done || echo "No .pkl files found"
+
+      # 7️⃣ Commit & push updated best genomes
+      - name: Commit & push best genomes
+        run: |
+          echo "Configuring git..."
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          echo "Staging best_genomes folder..."
           git add best_genomes/
-          git diff --quiet || git commit -m "Update best genomes [skip ci]"
-          git push origin HEAD:${{ github.ref }}
+          echo "Checking for changes..."
+          git diff --cached --name-status || echo "No changes to commit"
+          git diff --cached --quiet || git commit -m "Update best genomes [skip ci]"
+          echo "Pushing to branch ${{ github.ref }}..."
+          git push origin HEAD:${{ github.ref }} || echo "Nothing to push"
 
-      # Optional: Upload artifacts
-      - name: Upload best genomes as artifact
+      # 8️⃣ Upload best genomes as artifact (optional)
+      - name: Upload best genomes artifact
         uses: actions/upload-artifact@v4
         with:
           name: neat-best-genomes
           path: best_genomes/
+
+      # 9️⃣ Output training log (optional)
+      - name: Upload training log
+        uses: actions/upload-artifact@v4
+        with:
+          name: training-log
+          path: training.log
