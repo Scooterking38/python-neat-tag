@@ -13,6 +13,8 @@ initial_connection = full
 feed_forward = True
 activation_default = tanh
 aggregation_default = sum
+
+# ---- required for mutation ----
 activation_mutate_rate = 0.0
 weight_mutate_rate = 0.8
 weight_replace_rate = 0.1
@@ -20,6 +22,11 @@ node_add_prob = 0.2
 node_delete_prob = 0.2
 conn_add_prob = 0.5
 conn_delete_prob = 0.5
+
+# ---- required for species compatibility ----
+compatibility_disjoint_coefficient = 1.0
+compatibility_weight_coefficient = 0.5
+compatibility_threshold = 3.0
 
 [DefaultSpeciesSet]
 compatibility_threshold = 3.0
