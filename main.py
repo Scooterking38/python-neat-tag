@@ -14,7 +14,7 @@ while running:
             running = False
     
     win.fill((0,0,0))
-    inputs = (x, y)
+    inputs = (x/600, y/400)
     output = net.activate(inputs)
     x += output[0]
     y += output[1]
