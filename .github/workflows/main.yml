@@ -18,7 +18,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pygame neat-python imageio
+        pip install pygame neat-python imageio[ffmpeg]
 
     - name: Run training
       run: |
