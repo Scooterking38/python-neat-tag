@@ -26,27 +26,25 @@ def eval_genomes(genomes, config):
     start_time = time.time()
 
     for _, genome in genomes:
-        net = neat.nn.FeedForwardNetwork.create(genome, config)
-        genome.fitness = 0
+        genome.fitness = 0  # ALWAYS set first
 
-        # Start at random grid position
+    for _, genome in genomes:
+        # Global timeout check
+        if time.time() - start_time > 180:
+            print("Time limit reached, stopping evaluation early")
+            break
+
+        net = neat.nn.FeedForwardNetwork.create(genome, config)
+
         gx, gy = 0, 0
 
         for step in range(MAX_STEPS):
-            # Stop if ~3 minutes passed
-            if time.time() - start_time > 180:
-                return
-
-            # Inputs: relative position to target
             dx = (TARGET_POS[0] - gx) / (GRID_WIDTH - 1)
             dy = (TARGET_POS[1] - gy) / (GRID_HEIGHT - 1)
-            inputs = (dx, dy)
 
-            # Network outputs 4 values: up, down, left, right
-            output = net.activate(inputs)
+            output = net.activate((dx, dy))
             direction = output.index(max(output))
 
-            # Move one cell
             if direction == 0:
                 gy -= 1
             elif direction == 1:
@@ -56,20 +54,19 @@ def eval_genomes(genomes, config):
             elif direction == 3:
                 gx += 1
 
-            # Clamp inside grid
             gx = max(0, min(GRID_WIDTH - 1, gx))
             gy = max(0, min(GRID_HEIGHT - 1, gy))
 
-            # Fitness: closer to target = higher
             dist = abs(TARGET_POS[0] - gx) + abs(TARGET_POS[1] - gy)
             genome.fitness += 1 / (dist + 1)
 
-            # Draw on surface
+            # Drawing (unchanged)
             win.fill((0, 0, 0))
-            pygame.draw.rect(win, (0, 255, 0), (TARGET_POS[0]*CELL_SIZE, TARGET_POS[1]*CELL_SIZE, CELL_SIZE, CELL_SIZE))
-            pygame.draw.rect(win, (255, 0, 0), (gx*CELL_SIZE, gy*CELL_SIZE, CELL_SIZE, CELL_SIZE))
+            pygame.draw.rect(win, (0, 255, 0),
+                             (TARGET_POS[0]*CELL_SIZE, TARGET_POS[1]*CELL_SIZE, CELL_SIZE, CELL_SIZE))
+            pygame.draw.rect(win, (255, 0, 0),
+                             (gx*CELL_SIZE, gy*CELL_SIZE, CELL_SIZE, CELL_SIZE))
 
-            # Save frame
             frame_path = os.path.join(FRAME_DIR, f"frame_{frame_counter:05d}.png")
             pygame.image.save(win, frame_path)
             frame_counter += 1
