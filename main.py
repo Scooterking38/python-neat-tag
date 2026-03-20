@@ -49,6 +49,7 @@ def safe_activate(net, state):
 # ----------------------------
 # Core classes
 # ----------------------------
+# Square class with solid walls
 class Square:
     def __init__(self, x, y):
         self.x = x
@@ -56,12 +57,7 @@ class Square:
         self.size = 10
 
     def move(self, dx, dy):
-        """
-        Moves the square, enforcing solid walls.
-        Returns True if a wall was hit.
-        """
         wall_hit = False
-
         new_x = self.x + dx
         new_y = self.y + dy
 
@@ -87,14 +83,13 @@ class Square:
 
         return wall_hit
 
-
+# Game class
 class Game:
     def __init__(self):
         self.tagger = Square(50, 100)
         self.evader = Square(150, 100)
 
     def get_state(self):
-        # only dx, dy
         dx = self.evader.x - self.tagger.x
         dy = self.evader.y - self.tagger.y
         return [dx / WIDTH, dy / HEIGHT]
@@ -105,26 +100,20 @@ class Game:
         return dx, dy
 
     def step(self, out1, out2, early_gen=True):
-        """
-        Moves both agents.
-        Returns:
-        tagged, dx1, dy1, dx2, dy2, tagger_hit_wall, evader_hit_wall
-        """
+        # decode movement
         def decode(o, speed):
             ox, oy = safe_output(o)
             dx = (ox - 0.5) * 2 * speed
             dy = (oy - 0.5) * 2 * speed
-
             # minimum movement enforcement
             if 0 < abs(dx) < MIN_MOVE:
                 dx = MIN_MOVE * (1 if dx > 0 else -1)
             if 0 < abs(dy) < MIN_MOVE:
                 dy = MIN_MOVE * (1 if dy > 0 else -1)
-
-            # small exploration noise
-            dx += random.uniform(-0.1, 0.1)
-            dy += random.uniform(-0.1, 0.1)
-
+            # early generation randomness
+            if early_gen:
+                dx += random.uniform(-0.1, 0.1)
+                dy += random.uniform(-0.1, 0.1)
             return dx, dy
 
         dx1, dy1 = decode(out1, TAGGER_SPEED)
@@ -133,29 +122,18 @@ class Game:
         hit1 = self.tagger.move(dx1, dy1)
         hit2 = self.evader.move(dx2, dy2)
 
-        # compute distance to see if tagged
-        dx, dy = self.distance_vector()
-        dist = math.sqrt(dx**2 + dy**2)
+        # vector from evader → tagger
+        vec_x, vec_y = self.tagger.x - self.evader.x, self.tagger.y - self.evader.y
+        dist = math.sqrt(vec_x**2 + vec_y**2)
+        if dist == 0:
+            dist = 1e-5
+        ux, uy = vec_x / dist, vec_y / dist
+
         tagged = dist < (self.tagger.size + self.evader.size)
+        return tagged, dx1, dy1, dx2, dy2, hit1, hit2, ux, uy
 
-        return tagged, dx1, dy1, dx2, dy2, hit1, hit2
-# ----------------------------
-# Evaluate a single genome pair
-# ----------------------------
+# Evaluation function
 def eval_pair_args(args):
-    """
-    Evaluate a single tagger/evader neural network pair.
-    Returns: (tagger_score, evader_score)
-    Features:
-    - Solid walls
-    - Minimum movement enforced
-    - Tagger rewarded for moving closer
-    - Evader rewarded for moving away
-    - Evader heavily but moderately punished for moving toward tagger
-    - Wall-hit penalties
-    - Continuous survival reward for evader
-    """
-
     net_tagger, net_evader, early_gen = args
     score_tagger = 0.0
     score_evader = 0.0
@@ -165,56 +143,43 @@ def eval_pair_args(args):
         tagged = False
 
         for _ in range(MAX_STEPS):
-            # Get dx, dy input state
             state = game.get_state()
+            out_tagger = safe_output(net_tagger.activate(state) if net_tagger else [0.5,0.5])
+            out_evader = safe_output(net_evader.activate(state) if net_evader else [0.5,0.5])
 
-            # Network outputs
-            out_tagger = safe_activate(net_tagger, state)
-            out_evader = safe_activate(net_evader, state)
+            tagged, dx_t, dy_t, dx_e, dy_e, hit_t, hit_e, ux, uy = game.step(out_tagger, out_evader, early_gen)
 
-            # Step game
-            tagged, dx_t, dy_t, dx_e, dy_e, hit_t, hit_e = game.step(out_tagger, out_evader, early_gen)
+            # Project movements along evader→tagger vector
+            proj_tagger = dx_t*ux + dy_t*uy   # tagger wants to move closer
+            proj_evader  = dx_e*ux + dy_e*uy  # evader movement
 
-            # Vector from tagger to evader
-            vec_x, vec_y = game.distance_vector()
-            dist = math.sqrt(vec_x**2 + vec_y**2)
-            if dist == 0:
-                dist = 1e-5  # avoid divide by zero
-            ux, uy = vec_x / dist, vec_y / dist
+            # Rewards
+            score_tagger += max(0, proj_tagger) * 0.5
+            score_evader += max(0, -proj_evader) * 5  # strong reward for fleeing
 
-            # Project movements onto the tagger→evader vector
-            proj_tagger = dx_t * ux + dy_t * uy
-            proj_evader  = dx_e * ux + dy_e * uy
-
-            # --- directional rewards ---
-            score_tagger += max(0, proj_tagger) * 0.5   # slower, incremental reward for closing
-            score_evader  += max(0, -proj_evader) * 5   # strong reward for fleeing
-
-            # --- moderate punishment for evader moving toward tagger ---
+            # Punishment for moving toward opponent
             if proj_evader > 0:
                 score_evader -= proj_evader * 2
 
-            # --- punish inactivity ---
-            if abs(dx_t) + abs(dy_t) < MIN_MOVE:
+            # Inactivity penalties
+            if abs(dx_t)+abs(dy_t) < MIN_MOVE:
                 score_tagger -= INACTIVITY_PENALTY
-            if abs(dx_e) + abs(dy_e) < MIN_MOVE:
+            if abs(dx_e)+abs(dy_e) < MIN_MOVE:
                 score_evader -= INACTIVITY_PENALTY
 
-            # --- punish wall hits ---
-            if hit_t:
-                score_tagger -= 20
-            if hit_e:
-                score_evader -= 10   # slightly less harsh to let evader explore edges
+            # Wall penalties
+            if hit_t: score_tagger -= 20
+            if hit_e: score_evader -= 10
 
-            # --- continuous survival reward for evader ---
+            # Survival bonus
             score_evader += 1.0
 
-            # --- tag reward ---
+            # Tag reward
             if tagged:
                 score_tagger += TAG_REWARD
                 break
 
-        # Bonus for surviving full round
+        # bonus for surviving full round
         if not tagged:
             score_evader += MAX_STEPS
 
