@@ -7,7 +7,7 @@ no_fitness_termination = False
 
 [DefaultGenome]
 # --- Network structure ---
-num_inputs              = 3
+num_inputs              = 4
 num_outputs             = 4
 num_hidden              = 0
 initial_connection      = full
