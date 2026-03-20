@@ -17,9 +17,9 @@ GENERATIONS = 300
 
 
 class Square:
-    def __init__(self):
-        self.x = random.uniform(0, WIDTH)
-        self.y = random.uniform(0, HEIGHT)
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
         self.size = 10
 
     def move(self, dx, dy):
@@ -38,11 +38,10 @@ class Square:
 
         return wall_hit
 
-
 class Game:
     def __init__(self):
-        self.tagger = Square()
-        self.evader = Square()
+        self.tagger = Square(20, 20)      # always start at (20,20)
+        self.evader = Square(180, 180)    # always start at (180,180)
 
     def step(self, out1, out2):
         def decode(o):
