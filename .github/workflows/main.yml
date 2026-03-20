@@ -21,28 +21,11 @@ jobs:
       run: |
         pip install neat-python opencv-python numpy dill
 
-    - name: Run training and save artifacts
-      run: |
-        python main.py
+    - name: Run training and generate video
+      run: python main.py
 
-        python - <<EOF
-import dill
-from main import run, neat, render_game
-
-# Train NEAT populations
-best_tagger, best_evader, config = run('config.txt')
-
-# Save best genomes
-with open('best_tagger.pkl', 'wb') as f:
-    dill.dump(best_tagger, f)
-with open('best_evader.pkl', 'wb') as f:
-    dill.dump(best_evader, f)
-
-# Render final game video
-net_tagger = neat.nn.FeedForwardNetwork.create(best_tagger, config)
-net_evader = neat.nn.FeedForwardNetwork.create(best_evader, config)
-render_game(net_tagger, net_evader)
-EOF
+    - name: Save best genomes to pickle
+      run: python -c "import dill, main; best_tagger, best_evader, config = main.run('config.txt'); dill.dump(best_tagger, open('best_tagger.pkl','wb')); dill.dump(best_evader, open('best_evader.pkl','wb'))"
 
     - name: Upload trained populations and video
       uses: actions/upload-artifact@v4
