@@ -155,8 +155,14 @@ def run(config_path):
         print(f"Generation {gen} complete")
 
     # pick best
-    best_tagger = max(pop_tagger.population.values(), key=lambda g: g.fitness)
-    best_evader = max(pop_evader.population.values(), key=lambda g: g.fitness)
+    best_tagger = max(
+        [g for g in pop_tagger.population.values() if g.fitness is not None],
+        key=lambda g: g.fitness
+    )
+    best_evader = max(
+        [g for g in pop_evader.population.values() if g.fitness is not None],
+        key=lambda g: g.fitness
+    )
 
     return best_tagger, best_evader, config
 
