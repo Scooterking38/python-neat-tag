@@ -6,7 +6,7 @@ import numpy as np
 
 WIDTH, HEIGHT = 200, 200
 MAX_STEPS = 500
-SPEED = 1
+SPEED = 3
 
 TAG_REWARD = 100
 ROUNDS_PER_MATCH = 5
@@ -14,14 +14,12 @@ GENERATIONS = 200
 
 
 # ----------------------------
-# Utility (SAFE)
+# Safety helpers
 # ----------------------------
 
-def safe_number(x, default=0.0):
-    if x is None:
-        return default
+def safe(x, default=0.0):
     try:
-        if math.isnan(x) or math.isinf(x):
+        if x is None or math.isnan(x) or math.isinf(x):
             return default
         return float(x)
     except:
@@ -30,34 +28,37 @@ def safe_number(x, default=0.0):
 
 def safe_output(out):
     if out is None or not hasattr(out, "__len__") or len(out) < 2:
-        return 0.0, 0.0
+        return 0.5, 0.5
 
-    x = safe_number(out[0], 0.5)
-    y = safe_number(out[1], 0.5)
+    x = safe(out[0], 0.5)
+    y = safe(out[1], 0.5)
 
-    # clamp
-    x = max(0.0, min(1.0, x))
-    y = max(0.0, min(1.0, y))
+    return max(0, min(1, x)), max(0, min(1, y))
 
-    return x, y
+
+def safe_activate(net, state):
+    try:
+        if net is None:
+            return [0.5, 0.5]
+        out = net.activate(state)
+        return out if out is not None else [0.5, 0.5]
+    except:
+        return [0.5, 0.5]
 
 
 # ----------------------------
-# Core Classes
+# Core
 # ----------------------------
 
 class Square:
     def __init__(self, x, y):
-        self.x = safe_number(x)
-        self.y = safe_number(y)
+        self.x = safe(x)
+        self.y = safe(y)
         self.size = 10
 
     def move(self, dx, dy):
-        dx = safe_number(dx)
-        dy = safe_number(dy)
-
-        self.x = (self.x + dx) % WIDTH
-        self.y = (self.y + dy) % HEIGHT
+        self.x = (self.x + safe(dx)) % WIDTH
+        self.y = (self.y + safe(dy)) % HEIGHT
 
 
 class Game:
@@ -69,21 +70,17 @@ class Game:
         dx = self.evader.x - self.tagger.x
         dy = self.evader.y - self.tagger.y
 
-        # wrap-aware shortest direction
-        if dx > WIDTH / 2:
-            dx -= WIDTH
-        elif dx < -WIDTH / 2:
-            dx += WIDTH
+        if dx > WIDTH/2: dx -= WIDTH
+        if dx < -WIDTH/2: dx += WIDTH
+        if dy > HEIGHT/2: dy -= HEIGHT
+        if dy < -HEIGHT/2: dy += HEIGHT
 
-        if dy > HEIGHT / 2:
-            dy -= HEIGHT
-        elif dy < -HEIGHT / 2:
-            dy += HEIGHT
+        return [dx / WIDTH, dy / HEIGHT]
 
-        return [
-            dx / WIDTH,
-            dy / HEIGHT
-        ]
+    def distance(self):
+        dx = min(abs(self.tagger.x - self.evader.x), WIDTH - abs(self.tagger.x - self.evader.x))
+        dy = min(abs(self.tagger.y - self.evader.y), HEIGHT - abs(self.tagger.y - self.evader.y))
+        return math.sqrt(dx*dx + dy*dy)
 
     def step(self, out1, out2):
         def decode(o):
@@ -96,29 +93,15 @@ class Game:
         self.tagger.move(dx1, dy1)
         self.evader.move(dx2, dy2)
 
-        dx = min(abs(self.tagger.x - self.evader.x), WIDTH - abs(self.tagger.x - self.evader.x))
-        dy = min(abs(self.tagger.y - self.evader.y), HEIGHT - abs(self.tagger.y - self.evader.y))
-
-        dist = math.sqrt(dx * dx + dy * dy)
-
+        dist = self.distance()
         tagged = dist < (self.tagger.size + self.evader.size)
 
-        return tagged, dist
+        return tagged, dist, dx1, dy1, dx2, dy2
 
 
 # ----------------------------
 # Evaluation
 # ----------------------------
-
-def safe_activate(net, state):
-    try:
-        if net is None:
-            return [0.5, 0.5]
-        out = net.activate(state)
-        return out if out is not None else [0.5, 0.5]
-    except:
-        return [0.5, 0.5]
-
 
 def eval_pair(net_tagger, net_evader):
     score_tagger = 0.0
@@ -126,9 +109,7 @@ def eval_pair(net_tagger, net_evader):
 
     for _ in range(ROUNDS_PER_MATCH):
         game = Game()
-
-        # initial distance
-        _, prev_dist = game.step([0.5, 0.5], [0.5, 0.5])
+        prev_dist = game.distance()
 
         tagged = False
 
@@ -138,31 +119,41 @@ def eval_pair(net_tagger, net_evader):
             out1 = safe_activate(net_tagger, state)
             out2 = safe_activate(net_evader, state)
 
-            tagged, dist = game.step(out1, out2)
+            tagged, dist, dx1, dy1, dx2, dy2 = game.step(out1, out2)
 
-            prev_dist = safe_number(prev_dist)
-            dist = safe_number(dist)
+            dist = safe(dist)
+            prev_dist = safe(prev_dist)
 
-            # --- TAGGER ---
-            score_tagger += max(0.0, prev_dist - dist)
+            # --- TAGGER: get closer ---
+            score_tagger += 2 * max(0, prev_dist - dist)
 
-            # --- EVADER ---
-            score_evader += max(0.0, dist - prev_dist)
+            # --- EVADER: move away ---
+            score_evader += 2 * max(0, dist - prev_dist)
 
-            prev_dist = dist
+            # --- inactivity penalty (CRITICAL) ---
+            if abs(dx1) + abs(dy1) < 0.01:
+                score_tagger -= 0.1
+            if abs(dx2) + abs(dy2) < 0.01:
+                score_evader -= 0.1
 
+            # --- evader survival reward ---
+            score_evader += 0.1
+
+            # --- tag ---
             if tagged:
                 score_tagger += TAG_REWARD
                 break
 
+            prev_dist = dist
+
         if not tagged:
             score_evader += MAX_STEPS
 
-    return safe_number(score_tagger), safe_number(score_evader)
+    return safe(score_tagger), safe(score_evader)
 
 
 # ----------------------------
-# Training Loop
+# Training
 # ----------------------------
 
 def run(config_path):
@@ -178,30 +169,26 @@ def run(config_path):
     pop_evader = neat.Population(config)
 
     for gen in range(GENERATIONS):
-        tagger_genomes = list(pop_tagger.population.items())
-        evader_genomes = list(pop_evader.population.items())
+        taggers = list(pop_tagger.population.items())
+        evaders = list(pop_evader.population.items())
 
-        for _, g in tagger_genomes:
+        for _, g in taggers:
+            g.fitness = 0.0
+        for _, g in evaders:
             g.fitness = 0.0
 
-        for _, g in evader_genomes:
-            g.fitness = 0.0
-
-        for id1, g1 in tagger_genomes:
+        for id1, g1 in taggers:
             net1 = neat.nn.FeedForwardNetwork.create(g1, config)
 
-            opponents = random.sample(
-                evader_genomes,
-                min(3, len(evader_genomes))
-            )
+            opponents = random.sample(evaders, min(3, len(evaders)))
 
             for id2, g2 in opponents:
                 net2 = neat.nn.FeedForwardNetwork.create(g2, config)
 
                 s1, s2 = eval_pair(net1, net2)
 
-                g1.fitness += safe_number(s1)
-                g2.fitness += safe_number(s2)
+                g1.fitness += safe(s1)
+                g2.fitness += safe(s2)
 
         pop_tagger.reporters.post_evaluate(config, pop_tagger.population, pop_tagger.species, None)
         pop_evader.reporters.post_evaluate(config, pop_evader.population, pop_evader.species, None)
@@ -218,21 +205,14 @@ def run(config_path):
 
         print(f"Generation {gen} complete")
 
-    best_tagger = max(
-        pop_tagger.population.values(),
-        key=lambda g: safe_number(g.fitness, -1e9)
-    )
-
-    best_evader = max(
-        pop_evader.population.values(),
-        key=lambda g: safe_number(g.fitness, -1e9)
-    )
+    best_tagger = max(pop_tagger.population.values(), key=lambda g: safe(g.fitness, -1e9))
+    best_evader = max(pop_evader.population.values(), key=lambda g: safe(g.fitness, -1e9))
 
     return best_tagger, best_evader, config
 
 
 # ----------------------------
-# Rendering
+# Render
 # ----------------------------
 
 def render_game(net1, net2):
@@ -245,17 +225,17 @@ def render_game(net1, net2):
         out1 = safe_activate(net1, state)
         out2 = safe_activate(net2, state)
 
-        tagged, _ = game.step(out1, out2)
+        tagged, _, _, _, _, _ = game.step(out1, out2)
 
         frame = np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)
 
-        def draw_square(sq, color):
+        def draw(sq, color):
             x, y = int(sq.x), int(sq.y)
             s = int(sq.size)
             cv2.rectangle(frame, (x, y), (x + s, y + s), color, -1)
 
-        draw_square(game.tagger, (0, 0, 255))
-        draw_square(game.evader, (255, 0, 0))
+        draw(game.tagger, (0, 0, 255))
+        draw(game.evader, (255, 0, 0))
 
         frames.append(frame)
 
@@ -272,8 +252,8 @@ def render_game(net1, net2):
 # Main
 # ----------------------------
 
-if __name__ == '__main__':
-    best_tagger, best_evader, config = run('config.txt')
+if __name__ == "__main__":
+    best_tagger, best_evader, config = run("config.txt")
 
     net1 = neat.nn.FeedForwardNetwork.create(best_tagger, config)
     net2 = neat.nn.FeedForwardNetwork.create(best_evader, config)
