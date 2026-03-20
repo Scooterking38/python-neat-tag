@@ -1,115 +1,169 @@
 import neat
 import random
+import math
 import cv2
 import numpy as np
 
 WIDTH, HEIGHT = 200, 200
-MAX_STEPS = 5000
+MAX_STEPS = 500
 SPEED = 1
 
-WRAP_PENALTY = 20
-TAG_REWARD = 50
-EVADE_REWARD = 3
-EVADE_PUNISH = 1
+TAG_REWARD = 100
+ROUNDS_PER_MATCH = 5
+GENERATIONS = 200
 
-ROUNDS_PER_MATCH = 50
-GENERATIONS = 3000
 
+# ----------------------------
+# Utility (SAFE)
+# ----------------------------
+
+def safe_number(x, default=0.0):
+    if x is None:
+        return default
+    try:
+        if math.isnan(x) or math.isinf(x):
+            return default
+        return float(x)
+    except:
+        return default
+
+
+def safe_output(out):
+    if out is None or not hasattr(out, "__len__") or len(out) < 2:
+        return 0.0, 0.0
+
+    x = safe_number(out[0], 0.5)
+    y = safe_number(out[1], 0.5)
+
+    # clamp
+    x = max(0.0, min(1.0, x))
+    y = max(0.0, min(1.0, y))
+
+    return x, y
+
+
+# ----------------------------
+# Core Classes
+# ----------------------------
 
 class Square:
     def __init__(self, x, y):
-        self.x = x
-        self.y = y
+        self.x = safe_number(x)
+        self.y = safe_number(y)
         self.size = 10
 
     def move(self, dx, dy):
-        wall_hit = False
+        dx = safe_number(dx)
+        dy = safe_number(dy)
 
-        new_x = self.x + dx
-        new_y = self.y + dy
+        self.x = (self.x + dx) % WIDTH
+        self.y = (self.y + dy) % HEIGHT
 
-        if new_x < 0 or new_x >= WIDTH:
-            wall_hit = True
-        if new_y < 0 or new_y >= HEIGHT:
-            wall_hit = True
-
-        self.x = new_x % WIDTH
-        self.y = new_y % HEIGHT
-
-        return wall_hit
 
 class Game:
     def __init__(self):
-        self.tagger = Square(20, 20)      # always start at (20,20)
-        self.evader = Square(180, 180)    # always start at (180,180)
+        self.tagger = Square(random.randint(0, WIDTH), random.randint(0, HEIGHT))
+        self.evader = Square(random.randint(0, WIDTH), random.randint(0, HEIGHT))
+
+    def get_state(self):
+        dx = self.evader.x - self.tagger.x
+        dy = self.evader.y - self.tagger.y
+
+        # wrap-aware shortest direction
+        if dx > WIDTH / 2:
+            dx -= WIDTH
+        elif dx < -WIDTH / 2:
+            dx += WIDTH
+
+        if dy > HEIGHT / 2:
+            dy -= HEIGHT
+        elif dy < -HEIGHT / 2:
+            dy += HEIGHT
+
+        return [
+            dx / WIDTH,
+            dy / HEIGHT
+        ]
 
     def step(self, out1, out2):
         def decode(o):
-            return (o[0] - 0.5) * 2 * SPEED, (o[1] - 0.5) * 2 * SPEED
+            ox, oy = safe_output(o)
+            return (ox - 0.5) * 2 * SPEED, (oy - 0.5) * 2 * SPEED
 
         dx1, dy1 = decode(out1)
         dx2, dy2 = decode(out2)
 
-        hit1 = self.tagger.move(dx1, dy1)
-        hit2 = self.evader.move(dx2, dy2)
+        self.tagger.move(dx1, dy1)
+        self.evader.move(dx2, dy2)
 
         dx = min(abs(self.tagger.x - self.evader.x), WIDTH - abs(self.tagger.x - self.evader.x))
         dy = min(abs(self.tagger.y - self.evader.y), HEIGHT - abs(self.tagger.y - self.evader.y))
-        dist = (dx**2 + dy**2) ** 0.5
+
+        dist = math.sqrt(dx * dx + dy * dy)
 
         tagged = dist < (self.tagger.size + self.evader.size)
 
-        scale = max(5, min(20, 50 / (dist + 1)))
-        self.tagger.size = scale
-        self.evader.size = scale
-
-        return tagged, hit1, hit2
-
-    def get_state(self):
-        return [
-            self.tagger.x / WIDTH,
-            self.tagger.y / HEIGHT,
-            self.evader.x / WIDTH,
-            self.evader.y / HEIGHT,
-        ]
+        return tagged, dist
 
 
-def eval_pair(net_tagger, net_evader, freeze_evader=False):
-    score_tagger = 0
-    score_evader = 0
+# ----------------------------
+# Evaluation
+# ----------------------------
+
+def safe_activate(net, state):
+    try:
+        if net is None:
+            return [0.5, 0.5]
+        out = net.activate(state)
+        return out if out is not None else [0.5, 0.5]
+    except:
+        return [0.5, 0.5]
+
+
+def eval_pair(net_tagger, net_evader):
+    score_tagger = 0.0
+    score_evader = 0.0
 
     for _ in range(ROUNDS_PER_MATCH):
         game = Game()
-        prev_dx = min(abs(game.tagger.x - game.evader.x), WIDTH - abs(game.tagger.x - game.evader.x))
-        prev_dy = min(abs(game.tagger.y - game.evader.y), HEIGHT - abs(game.tagger.y - game.evader.y))
-        prev_dist = (prev_dx**2 + prev_dy**2) ** 0.5
 
-        for _ in range(MAX_STEPS):
+        # initial distance
+        _, prev_dist = game.step([0.5, 0.5], [0.5, 0.5])
+
+        tagged = False
+
+        for step in range(MAX_STEPS):
             state = game.get_state()
 
-            out1 = net_tagger.activate(state)
-            if freeze_evader:
-                out2 = [0.5, 0.5]  # neutral output → no movement
-            else:
-                out2 = net_evader.activate(state)
+            out1 = safe_activate(net_tagger, state)
+            out2 = safe_activate(net_evader, state)
 
-            tagged, hit1, hit2 = game.step(out1, out2)
+            tagged, dist = game.step(out1, out2)
 
-            # Calculate new distance
-            dx = min(abs(game.tagger.x - game.evader.x), WIDTH - abs(game.tagger.x - game.evader.x))
-            dy = min(abs(game.tagger.y - game.evader.y), HEIGHT - abs(game.tagger.y - game.evader.y))
-            dist = (dx**2 + dy**2)**0.5
+            prev_dist = safe_number(prev_dist)
+            dist = safe_number(dist)
 
-            # Reward tagger for reducing distance
-            score_tagger += max(0, prev_dist - dist)
+            # --- TAGGER ---
+            score_tagger += max(0.0, prev_dist - dist)
 
-            prev_dist = dist  # update for next step
+            # --- EVADER ---
+            score_evader += max(0.0, dist - prev_dist)
 
-            # Optional: break if tagged
+            prev_dist = dist
+
             if tagged:
+                score_tagger += TAG_REWARD
                 break
 
-    return score_tagger, score_evader
+        if not tagged:
+            score_evader += MAX_STEPS
+
+    return safe_number(score_tagger), safe_number(score_evader)
+
+
+# ----------------------------
+# Training Loop
+# ----------------------------
 
 def run(config_path):
     config = neat.Config(
@@ -127,23 +181,27 @@ def run(config_path):
         tagger_genomes = list(pop_tagger.population.items())
         evader_genomes = list(pop_evader.population.items())
 
-        # reset fitness
         for _, g in tagger_genomes:
-            g.fitness = 0
+            g.fitness = 0.0
+
         for _, g in evader_genomes:
-            g.fitness = 0
+            g.fitness = 0.0
 
-        # pair randomly
-        random.shuffle(evader_genomes)
-
-        for (id1, g1), (id2, g2) in zip(tagger_genomes, evader_genomes):
+        for id1, g1 in tagger_genomes:
             net1 = neat.nn.FeedForwardNetwork.create(g1, config)
-            net2 = neat.nn.FeedForwardNetwork.create(g2, config)
 
-            s1, s2 = eval_pair(net1, net2)
+            opponents = random.sample(
+                evader_genomes,
+                min(3, len(evader_genomes))
+            )
 
-            g1.fitness += s1
-            g2.fitness += s2
+            for id2, g2 in opponents:
+                net2 = neat.nn.FeedForwardNetwork.create(g2, config)
+
+                s1, s2 = eval_pair(net1, net2)
+
+                g1.fitness += safe_number(s1)
+                g2.fitness += safe_number(s2)
 
         pop_tagger.reporters.post_evaluate(config, pop_tagger.population, pop_tagger.species, None)
         pop_evader.reporters.post_evaluate(config, pop_evader.population, pop_evader.species, None)
@@ -160,18 +218,22 @@ def run(config_path):
 
         print(f"Generation {gen} complete")
 
-    # pick best
     best_tagger = max(
-        [g for g in pop_tagger.population.values() if g.fitness is not None],
-        key=lambda g: g.fitness
+        pop_tagger.population.values(),
+        key=lambda g: safe_number(g.fitness, -1e9)
     )
+
     best_evader = max(
-        [g for g in pop_evader.population.values() if g.fitness is not None],
-        key=lambda g: g.fitness
+        pop_evader.population.values(),
+        key=lambda g: safe_number(g.fitness, -1e9)
     )
 
     return best_tagger, best_evader, config
 
+
+# ----------------------------
+# Rendering
+# ----------------------------
 
 def render_game(net1, net2):
     game = Game()
@@ -180,15 +242,16 @@ def render_game(net1, net2):
     for _ in range(MAX_STEPS):
         state = game.get_state()
 
-        out1 = net1.activate(state)
-        out2 = net2.activate(state)
+        out1 = safe_activate(net1, state)
+        out2 = safe_activate(net2, state)
 
-        tagged, _, _ = game.step(out1, out2)
+        tagged, _ = game.step(out1, out2)
 
         frame = np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)
 
         def draw_square(sq, color):
-            x, y, s = int(sq.x), int(sq.y), int(sq.size)
+            x, y = int(sq.x), int(sq.y)
+            s = int(sq.size)
             cv2.rectangle(frame, (x, y), (x + s, y + s), color, -1)
 
         draw_square(game.tagger, (0, 0, 255))
@@ -204,6 +267,10 @@ def render_game(net1, net2):
         out.write(f)
     out.release()
 
+
+# ----------------------------
+# Main
+# ----------------------------
 
 if __name__ == '__main__':
     best_tagger, best_evader, config = run('config.txt')
