@@ -152,7 +152,7 @@ def run(config_path):
         pop_tagger.species.speciate(config, pop_tagger.population, gen)
         pop_evader.species.speciate(config, pop_evader.population, gen)
 
-        print(f\"Generation {gen} complete\")
+        print(f"Generation {gen} complete")
 
     # pick best
     best_tagger = max(pop_tagger.population.values(), key=lambda g: g.fitness)
