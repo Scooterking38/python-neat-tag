@@ -1,29 +1,54 @@
-name: Run NEAT Game
+name: NEAT Tagged-Evader Training
 
-on: [push]
+on:
+  push:
+    branches: [ main ]
 
 jobs:
-  build:
+  train:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
     - name: Setup Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v4
       with:
         python-version: '3.10'
 
     - name: Install dependencies
       run: |
-        pip install neat-python opencv-python numpy
+        pip install neat-python opencv-python numpy dill
 
-    - name: Run training
+    - name: Run training and save artifacts
       run: |
         python main.py
 
-    - name: Upload video
+        python - <<EOF
+import dill
+from main import run, neat, render_game
+
+# Train NEAT populations
+best_tagger, best_evader, config = run('config.txt')
+
+# Save best genomes
+with open('best_tagger.pkl', 'wb') as f:
+    dill.dump(best_tagger, f)
+with open('best_evader.pkl', 'wb') as f:
+    dill.dump(best_evader, f)
+
+# Render final game video
+net_tagger = neat.nn.FeedForwardNetwork.create(best_tagger, config)
+net_evader = neat.nn.FeedForwardNetwork.create(best_evader, config)
+render_game(net_tagger, net_evader)
+EOF
+
+    - name: Upload trained populations and video
       uses: actions/upload-artifact@v4
       with:
-        name: result-video
-        path: best.mp4
+        name: neat-tagged-evader-artifacts
+        path: |
+          best_tagger.pkl
+          best_evader.pkl
+          best.mp4
