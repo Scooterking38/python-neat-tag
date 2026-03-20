@@ -4,13 +4,16 @@ import cv2
 import numpy as np
 
 WIDTH, HEIGHT = 200, 200
-MAX_STEPS = 3000
+MAX_STEPS = 300
 SPEED = 3
 
 WRAP_PENALTY = 0.2
 TAG_REWARD = 5
 EVADE_REWARD = 3
 EVADE_PUNISH = 3
+
+ROUNDS_PER_MATCH = 5
+GENERATIONS = 30
 
 
 class Square:
@@ -40,7 +43,6 @@ class Game:
     def __init__(self):
         self.tagger = Square()
         self.evader = Square()
-        self.steps = 0
 
     def step(self, out1, out2):
         def decode(o):
@@ -62,7 +64,6 @@ class Game:
         self.tagger.size = scale
         self.evader.size = scale
 
-        self.steps += 1
         return tagged, hit1, hit2
 
     def get_state(self):
@@ -74,48 +75,34 @@ class Game:
         ]
 
 
-def eval_genomes(genomes, config):
-    nets = []
-    ge = []
+def eval_pair(net_tagger, net_evader):
+    score_tagger = 0
+    score_evader = 0
 
-    for _, g in genomes:
-        net = neat.nn.FeedForwardNetwork.create(g, config)
-        nets.append(net)
-        g.fitness = 0
-        ge.append(g)
-
-    for i in range(0, len(nets), 2):
-        if i + 1 >= len(nets):
-            break
-
-        net1 = nets[i]
-        net2 = nets[i + 1]
-        g1 = ge[i]      # tagger
-        g2 = ge[i + 1]  # evader
-
+    for _ in range(ROUNDS_PER_MATCH):
         game = Game()
 
         for _ in range(MAX_STEPS):
             state = game.get_state()
-            out1 = net1.activate(state)
-            out2 = net2.activate(state)
+
+            out1 = net_tagger.activate(state)
+            out2 = net_evader.activate(state)
 
             tagged, hit1, hit2 = game.step(out1, out2)
 
-            # wrap penalties
             if hit1:
-                g1.fitness -= WRAP_PENALTY
+                score_tagger -= WRAP_PENALTY
             if hit2:
-                g2.fitness -= WRAP_PENALTY
+                score_evader -= WRAP_PENALTY
 
             if tagged:
-                # strong reward/punishment
-                g1.fitness += TAG_REWARD
-                g2.fitness -= EVADE_PUNISH
+                score_tagger += TAG_REWARD
+                score_evader -= EVADE_PUNISH
                 break
         else:
-            # evader survived full duration
-            g2.fitness += EVADE_REWARD
+            score_evader += EVADE_REWARD
+
+    return score_tagger, score_evader
 
 
 def run(config_path):
@@ -127,12 +114,51 @@ def run(config_path):
         config_path,
     )
 
-    pop = neat.Population(config)
+    pop_tagger = neat.Population(config)
+    pop_evader = neat.Population(config)
 
-    # increased generations
-    winner = pop.run(eval_genomes, 100)
+    for gen in range(GENERATIONS):
+        tagger_genomes = list(pop_tagger.population.items())
+        evader_genomes = list(pop_evader.population.items())
 
-    return winner, config
+        # reset fitness
+        for _, g in tagger_genomes:
+            g.fitness = 0
+        for _, g in evader_genomes:
+            g.fitness = 0
+
+        # pair randomly
+        random.shuffle(evader_genomes)
+
+        for (id1, g1), (id2, g2) in zip(tagger_genomes, evader_genomes):
+            net1 = neat.nn.FeedForwardNetwork.create(g1, config)
+            net2 = neat.nn.FeedForwardNetwork.create(g2, config)
+
+            s1, s2 = eval_pair(net1, net2)
+
+            g1.fitness += s1
+            g2.fitness += s2
+
+        pop_tagger.reporters.post_evaluate(config, pop_tagger.population, pop_tagger.species, None)
+        pop_evader.reporters.post_evaluate(config, pop_evader.population, pop_evader.species, None)
+
+        pop_tagger.population = pop_tagger.reproduction.reproduce(
+            config, pop_tagger.species, config.pop_size, gen
+        )
+        pop_evader.population = pop_evader.reproduction.reproduce(
+            config, pop_evader.species, config.pop_size, gen
+        )
+
+        pop_tagger.species.speciate(config, pop_tagger.population, gen)
+        pop_evader.species.speciate(config, pop_evader.population, gen)
+
+        print(f\"Generation {gen} complete\")
+
+    # pick best
+    best_tagger = max(pop_tagger.population.values(), key=lambda g: g.fitness)
+    best_evader = max(pop_evader.population.values(), key=lambda g: g.fitness)
+
+    return best_tagger, best_evader, config
 
 
 def render_game(net1, net2):
@@ -141,6 +167,7 @@ def render_game(net1, net2):
 
     for _ in range(MAX_STEPS):
         state = game.get_state()
+
         out1 = net1.activate(state)
         out2 = net2.activate(state)
 
@@ -167,7 +194,9 @@ def render_game(net1, net2):
 
 
 if __name__ == '__main__':
-    winner, config = run('config.txt')
-    net = neat.nn.FeedForwardNetwork.create(winner, config)
+    best_tagger, best_evader, config = run('config.txt')
 
-    render_game(net, net)
+    net1 = neat.nn.FeedForwardNetwork.create(best_tagger, config)
+    net2 = neat.nn.FeedForwardNetwork.create(best_evader, config)
+
+    render_game(net1, net2)
