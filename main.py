@@ -75,35 +75,42 @@ class Game:
         ]
 
 
-def eval_pair(net_tagger, net_evader):
+def eval_pair(net_tagger, net_evader, freeze_evader=True):
     score_tagger = 0
     score_evader = 0
 
     for _ in range(ROUNDS_PER_MATCH):
         game = Game()
+        prev_dx = min(abs(game.tagger.x - game.evader.x), WIDTH - abs(game.tagger.x - game.evader.x))
+        prev_dy = min(abs(game.tagger.y - game.evader.y), HEIGHT - abs(game.tagger.y - game.evader.y))
+        prev_dist = (prev_dx**2 + prev_dy**2) ** 0.5
 
         for _ in range(MAX_STEPS):
             state = game.get_state()
 
             out1 = net_tagger.activate(state)
-            out2 = net_evader.activate(state)
+            if freeze_evader:
+                out2 = [0.5, 0.5]  # neutral output → no movement
+            else:
+                out2 = net_evader.activate(state)
 
             tagged, hit1, hit2 = game.step(out1, out2)
 
-            if hit1:
-                score_tagger -= WRAP_PENALTY
-            if hit2:
-                score_evader -= WRAP_PENALTY
+            # Calculate new distance
+            dx = min(abs(game.tagger.x - game.evader.x), WIDTH - abs(game.tagger.x - game.evader.x))
+            dy = min(abs(game.tagger.y - game.evader.y), HEIGHT - abs(game.tagger.y - game.evader.y))
+            dist = (dx**2 + dy**2)**0.5
 
+            # Reward tagger for reducing distance
+            score_tagger += max(0, prev_dist - dist)
+
+            prev_dist = dist  # update for next step
+
+            # Optional: break if tagged
             if tagged:
-                score_tagger += TAG_REWARD
-                score_evader -= EVADE_PUNISH
                 break
-        else:
-            score_evader += EVADE_REWARD
 
     return score_tagger, score_evader
-
 
 def run(config_path):
     config = neat.Config(
