@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 
 WIDTH, HEIGHT = 200, 200
-MAX_STEPS = 300
+MAX_STEPS = 3000
 SPEED = 0.5
 
 WRAP_PENALTY = 20
@@ -74,7 +74,7 @@ class Game:
         ]
 
 
-def eval_pair(net_tagger, net_evader, freeze_evader=True):
+def eval_pair(net_tagger, net_evader, freeze_evader=False):
     score_tagger = 0
     score_evader = 0
 
