@@ -1,94 +1,29 @@
-name: Train NEAT and Generate Simulation Video
+name: Run NEAT Game
 
-on:
-  workflow_dispatch:  # manual trigger
-  push:
-    paths:
-      - "best_genomes/**"  # optional: re-run if genomes folder changes
+on: [push]
 
 jobs:
-  train-and-video:
+  build:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout code
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: true  # allow pushing back
+    - uses: actions/checkout@v3
 
-      # 2️⃣ Setup Python
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
 
-      # 3️⃣ Install dependencies
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pygame neat-python imageio[ffmpeg]
+    - name: Install dependencies
+      run: |
+        pip install neat-python opencv-python numpy
 
-      # 4️⃣ Headless Pygame
-      - name: Set SDL to dummy (headless mode)
-        run: echo "SDL_VIDEODRIVER=dummy" >> $GITHUB_ENV
+    - name: Run training
+      run: |
+        python main.py
 
-      # 5️⃣ Ensure best_genomes folder exists
-      - name: Ensure best_genomes folder
-        run: |
-          echo "Ensuring best_genomes folder exists..."
-          mkdir -p best_genomes
-          ls -la best_genomes
-
-      # 6️⃣ Run NEAT training
-      - name: Run NEAT training
-        run: |
-          echo "Starting NEAT training..."
-          python main.py 2>&1 | tee training.log
-          echo "Training finished. Contents of best_genomes folder:"
-          ls -la best_genomes
-          echo "Checking for .pkl files:"
-          for f in best_genomes/*.pkl; do echo "$f"; done || echo "No .pkl files found"
-
-      # 7️⃣ Commit & push updated best genomes
-      - name: Commit & push best genomes
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add best_genomes/
-          git diff --cached --name-status || echo "No changes to commit"
-          git diff --cached --quiet || git commit -m "Update best genomes [skip ci]"
-          git push origin HEAD:${{ github.ref }} || echo "Nothing to push"
-
-      # 8️⃣ Generate simulation video
-      - name: Generate simulation video
-        run: |
-          echo "Generating simulation video from best genomes..."
-          python record_game.py 2>&1 | tee video.log
-          ls -la
-          echo "Video generation finished."
-
-      # 9️⃣ Upload artifacts
-      - name: Upload best genomes
-        uses: actions/upload-artifact@v4
-        with:
-          name: neat-best-genomes
-          path: best_genomes/
-
-      - name: Upload simulation video
-        uses: actions/upload-artifact@v4
-        with:
-          name: simulation-video
-          path: simulation.mp4
-
-      - name: Upload training log
-        uses: actions/upload-artifact@v4
-        with:
-          name: training-log
-          path: training.log
-
-      - name: Upload video log
-        uses: actions/upload-artifact@v4
-        with:
-          name: video-log
-          path: video.log
+    - name: Upload video
+      uses: actions/upload-artifact@v3
+      with:
+        name: result-video
+        path: best.mp4
