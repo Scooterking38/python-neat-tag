@@ -12,12 +12,14 @@ WIDTH, HEIGHT = 200, 200
 MAX_STEPS = 500
 SPEED = 5
 TAG_REWARD = 100
-ROUNDS_PER_MATCH = 50
+ROUNDS_PER_MATCH = 500
 GENERATIONS = 200
 MIN_MOVE = 1.0          # minimum movement to avoid freeze
 INACTIVITY_PENALTY = 50 # heavy punishment for zero movement
 PARALLEL = 16
 EXPLORATION_BIAS = 0.1  # small bias for early generations
+TAGGER_SPEED = 1.0
+EVADER_SPEED = 1.5  # evader moves faster than tagger
 
 # ----------------------------
 # Safe helpers
@@ -108,10 +110,10 @@ class Game:
         Returns:
         tagged, dx1, dy1, dx2, dy2, tagger_hit_wall, evader_hit_wall
         """
-        def decode(o):
+        def decode(o, speed):
             ox, oy = safe_output(o)
-            dx = (ox - 0.5) * 2 * SPEED
-            dy = (oy - 0.5) * 2 * SPEED
+            dx = (ox - 0.5) * 2 * speed
+            dy = (oy - 0.5) * 2 * speed
 
             # minimum movement enforcement
             if 0 < abs(dx) < MIN_MOVE:
@@ -119,14 +121,14 @@ class Game:
             if 0 < abs(dy) < MIN_MOVE:
                 dy = MIN_MOVE * (1 if dy > 0 else -1)
 
-            # early generation small randomness
-            if early_gen:
-                dx += random.uniform(-0.1, 0.1)
-                dy += random.uniform(-0.1, 0.1)
+            # small exploration noise
+            dx += random.uniform(-0.1, 0.1)
+            dy += random.uniform(-0.1, 0.1)
+
             return dx, dy
 
-        dx1, dy1 = decode(out1)
-        dx2, dy2 = decode(out2)
+        dx1, dy1 = decode(out1, TAGGER_SPEED)
+        dx2, dy2 = decode(out2, EVADER_SPEED)
 
         hit1 = self.tagger.move(dx1, dy1)
         hit2 = self.evader.move(dx2, dy2)
