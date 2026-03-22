@@ -149,25 +149,25 @@ def train():
                      observation_space=obs_space, action_space=act_space, device=device)
 
     # -----------------
-    # Force numeric-safe attributes (fix 'auto' issue)
+    # Force numeric-safe attributes (_underscore)
     # -----------------
     for agent in [agent_red, agent_blue]:
-        # write_interval
-        if isinstance(agent.write_interval, str) and agent.write_interval == "auto":
-            agent.write_interval = 1
-        elif isinstance(agent.write_interval, str):
-            agent.write_interval = int(agent.write_interval)
+        # _write_interval
+        if isinstance(agent._write_interval, str) and agent._write_interval == "auto":
+            agent._write_interval = 1
+        elif isinstance(agent._write_interval, str):
+            agent._write_interval = int(agent._write_interval)
 
-        # checkpoint_interval
-        if isinstance(agent.checkpoint_interval, str) and agent.checkpoint_interval == "auto":
-            agent.checkpoint_interval = 0
-        elif isinstance(agent.checkpoint_interval, str):
-            agent.checkpoint_interval = int(agent.checkpoint_interval)
+        # _checkpoint_interval
+        if isinstance(agent._checkpoint_interval, str) and agent._checkpoint_interval == "auto":
+            agent._checkpoint_interval = 0
+        elif isinstance(agent._checkpoint_interval, str):
+            agent._checkpoint_interval = int(agent._checkpoint_interval)
 
-        # other numeric attributes
-        agent.learning_epochs = int(agent.learning_epochs)
-        agent.mini_batches = int(agent.mini_batches)
-        agent.rollouts = int(agent.rollouts)
+        # Other numeric attributes
+        agent._learning_epochs = int(agent._learning_epochs)
+        agent._mini_batches = int(agent._mini_batches)
+        agent._rollouts = int(agent._rollouts)
 
     # -----------------
     # Training loop
@@ -224,7 +224,7 @@ def train():
             obs = next_obs
             timestep += 1
 
-        # Update agents at the end of the episode
+        # Update both agents at the end of the episode
         agent_red.update()
         agent_blue.update()
         print(f"Episode {episode} done")
