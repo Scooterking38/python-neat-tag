@@ -118,7 +118,6 @@ def train():
     # PPO config
     # -----------------
     from skrl.agents.torch.ppo import PPO_DEFAULT_CONFIG
-
     cfg = PPO_DEFAULT_CONFIG.copy()
     cfg["learning_epochs"] = 4
     cfg["mini_batches"] = 2
@@ -150,11 +149,22 @@ def train():
                      observation_space=obs_space, action_space=act_space, device=device)
 
     # -----------------
-    # Force numeric types on critical attributes (fix write_interval TypeError)
+    # Force numeric-safe attributes (fix 'auto' issue)
     # -----------------
     for agent in [agent_red, agent_blue]:
-        agent.write_interval = int(agent.write_interval)
-        agent.checkpoint_interval = int(agent.checkpoint_interval)
+        # write_interval
+        if isinstance(agent.write_interval, str) and agent.write_interval == "auto":
+            agent.write_interval = 1
+        elif isinstance(agent.write_interval, str):
+            agent.write_interval = int(agent.write_interval)
+
+        # checkpoint_interval
+        if isinstance(agent.checkpoint_interval, str) and agent.checkpoint_interval == "auto":
+            agent.checkpoint_interval = 0
+        elif isinstance(agent.checkpoint_interval, str):
+            agent.checkpoint_interval = int(agent.checkpoint_interval)
+
+        # other numeric attributes
         agent.learning_epochs = int(agent.learning_epochs)
         agent.mini_batches = int(agent.mini_batches)
         agent.rollouts = int(agent.rollouts)
@@ -214,12 +224,12 @@ def train():
             obs = next_obs
             timestep += 1
 
-        # Update both agents at the end of the episode
+        # Update agents at the end of the episode
         agent_red.update()
         agent_blue.update()
         print(f"Episode {episode} done")
 
-    # Save training artifacts
+    # Save training outputs
     imageio.mimsave("training.mp4", frames, fps=30)
     torch.save(policy_red.state_dict(), "red_agent.pkl")
     torch.save(policy_blue.state_dict(), "blue_agent.pkl")
