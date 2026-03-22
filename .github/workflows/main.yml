@@ -1,35 +1,27 @@
-name: Run NEAT Tagger/Evader and Upload Video
+name: Train Tag AI
 
-on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:   # allow manual trigger
+on: [push]
 
 jobs:
-  run_simulation:
+  train:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - uses: actions/checkout@v3
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: 3.14
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install neat-python opencv-python numpy
+    - name: Install dependencies
+      run: |
+        pip install torch
+        pip install skrl
+        pip install pygame
+        pip install imageio
+        pip install numpy
 
-      - name: Run NEAT simulation
-        run: |
-          python main.py
+    - name: Run training
+      run: python tag_game_rl.py
 
-      - name: Upload video artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: best-video
-          path: best.mp4
