@@ -1,16 +1,15 @@
-name: Train and Record Pong Agent
+name: SB3 Pong Train and Record
 
 on:
   push:
-    branches: [ "main" ]
-  workflow_dispatch: # Allows you to trigger the run manually from the Actions tab
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
-  train-eval:
+  run-rl:
     runs-on: ubuntu-latest
-    
     steps:
-      - name: Checkout Code
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -18,28 +17,22 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install System Dependencies for Rendering
+      - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb ffmpeg python3-opengl
+          sudo apt-get install -y xvfb ffmpeg
 
-      - name: Install Python Dependencies
+      - name: Install RL Dependencies
         run: |
-          python -m pip install --upgrade pip
-          # CPU version of PyTorch for CI efficiency
-          pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-          # Install gymnasium with atari and opencv dependencies
-          pip install "gymnasium[atari,accept-rom-license]" 
-          pip install opencv-python-headless skrl moviepy ale-py
+          pip install "gymnasium[atari,accept-rom-license]"
+          pip install stable-baselines3 shimmy opencv-python-headless ale-py
 
-      - name: Run Training and Record Video
-        # xvfb-run creates a virtual display so the game can render headlessly
+      - name: Run Script
         run: |
-          xvfb-run -a -s "-screen 0 1024x768x24" python main.py
+          xvfb-run -a python main.py
 
-      - name: Upload Video Artifact
+      - name: Upload Video
         uses: actions/upload-artifact@v4
         with:
-          name: pong-agent-video
+          name: pong-video
           path: videos/
-          retention-days: 7
