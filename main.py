@@ -24,9 +24,12 @@ class QNetwork(DeterministicMixin, Model):
         Model.__init__(self, observation_space, action_space, device)
         DeterministicMixin.__init__(self, clip_actions)
 
-        # Input shape expected: (4, 84, 84) due to FrameStack
+        # Use .shape to get the (Channels, Height, Width) tuple
+        # For FrameStack(4), shape[0] will be 4
+        input_channels = self.observation_space.shape[0]
+
         self.net = nn.Sequential(
-            nn.Conv2d(self.num_observations[0], 32, kernel_size=8, stride=4),
+            nn.Conv2d(input_channels, 32, kernel_size=8, stride=4),
             nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=4, stride=2),
             nn.ReLU(),
