@@ -1,237 +1,108 @@
-import os
-os.environ["SDL_VIDEODRIVER"] = "dummy"
-os.environ["SDL_AUDIODRIVER"] = "dummy"
-
-import pygame
-import numpy as np
+import gymnasium as gym
 import torch
-import imageio
+import torch.nn as nn
 
-from skrl.models.torch import Model, GaussianMixin, DeterministicMixin
+from gymnasium.wrappers import AtariPreprocessing, FrameStack, RecordVideo
+from skrl.agents.torch.dqn import DQN, DQN_DEFAULT_CONFIG
+from skrl.envs.wrappers.torch import wrap_env
 from skrl.memories.torch import RandomMemory
-from skrl.agents.torch.ppo import PPO, PPO_DEFAULT_CONFIG
+from skrl.models.torch import DeterministicMixin, Model
+from skrl.trainers.torch import SequentialTrainer
+from skrl.utils import set_seed
 
-# -----------------
-# Game Environment
-# -----------------
-class TagEnv:
-    def __init__(self, size=500, max_steps=300):
-        self.size = size
-        self.max_steps = max_steps
-        self.step_count = 0
-        pygame.init()
-        self.screen = pygame.Surface((size, size))
-        self.reset()
+# Seed for reproducibility
+set_seed(42)
 
-    def reset(self):
-        self.red = np.array([50.0, 50.0], dtype=np.float32)
-        self.blue = np.array([450.0, 450.0], dtype=np.float32)
-        self.step_count = 0
-        return self._get_obs()
-
-    def _get_obs(self):
-        return np.concatenate([self.red / self.size, self.blue / self.size]).astype(np.float32)
-
-    def step(self, action_red, action_blue):
-        speed = 4
-        self.red += action_red * speed
-        self.blue += action_blue * speed
-        self.red = np.clip(self.red, 0, self.size)
-        self.blue = np.clip(self.blue, 0, self.size)
-
-        dist = np.linalg.norm(self.red - self.blue)
-        reward_red = -dist * 0.01
-        reward_blue = dist * 0.01
-        done = False
-        if dist < 20:
-            reward_red += 10
-            reward_blue -= 10
-            done = True
-        self.step_count += 1
-        if self.step_count >= self.max_steps:
-            done = True
-        return self._get_obs(), reward_red, reward_blue, done
-
-    def render(self):
-        self.screen.fill((30, 30, 30))
-        red_rect = pygame.Rect(int(self.red[0]), int(self.red[1]), 20, 20)
-        blue_rect = pygame.Rect(int(self.blue[0]), int(self.blue[1]), 20, 20)
-        pygame.draw.rect(self.screen, (255, 50, 50), red_rect)
-        pygame.draw.rect(self.screen, (50, 50, 255), blue_rect)
-        return pygame.surfarray.array3d(self.screen)
-
-# -----------------
-# Neural Networks
-# -----------------
-class Policy(GaussianMixin, Model):
-    def __init__(self, observation_space, action_space, device):
+# 1. Define the CNN Model for Atari
+class QNetwork(DeterministicMixin, Model):
+    def __init__(self, observation_space, action_space, device, clip_actions=False):
         Model.__init__(self, observation_space, action_space, device)
-        GaussianMixin.__init__(self)
-        self.net = torch.nn.Sequential(
-            torch.nn.Linear(self.num_observations, 64),
-            torch.nn.ReLU(),
-            torch.nn.Linear(64, 64),
-            torch.nn.ReLU(),
-            torch.nn.Linear(64, self.num_actions),
-            torch.nn.Tanh()
-        )
-        self.log_std = torch.nn.Parameter(torch.zeros(self.num_actions))
+        DeterministicMixin.__init__(self, clip_actions)
 
-    def compute(self, inputs, role):
-        mean = self.net(inputs["states"])
-        log_std = self.log_std.expand_as(mean)
-        return mean, log_std, {}
-
-class Value(DeterministicMixin, Model):
-    def __init__(self, observation_space, action_space, device):
-        Model.__init__(self, observation_space, action_space, device)
-        DeterministicMixin.__init__(self)
-        self.net = torch.nn.Sequential(
-            torch.nn.Linear(self.num_observations, 64),
-            torch.nn.ReLU(),
-            torch.nn.Linear(64, 64),
-            torch.nn.ReLU(),
-            torch.nn.Linear(64, 1)
+        self.net = nn.Sequential(
+            nn.Conv2d(self.num_observations[0], 32, kernel_size=8, stride=4),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=4, stride=2),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(64 * 7 * 7, 512),
+            nn.ReLU(),
+            nn.Linear(512, self.num_actions)
         )
 
     def compute(self, inputs, role):
-        return self.net(inputs["states"]), {}
+        # Normalize pixel values to [0, 1]
+        return self.net(inputs["states"] / 255.0), {}
 
-# -----------------
-# Training
-# -----------------
-def train():
-    import torch
-    import imageio
+def main():
+    # 2. Setup Training Environment
+    env = gym.make("ALE/Pong-v5", frameskip=1)
+    env = AtariPreprocessing(env, screen_size=84, grayscale_obs=True, frame_skip=4)
+    env = FrameStack(env, 4)
+    env = wrap_env(env)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print("Using device:", device)
+    device = env.device
 
-    # -----------------
-    # Environment
-    # -----------------
-    env = TagEnv()
-    obs_space = 4
-    act_space = 2
+    # 3. Setup Memory and Agent
+    memory = RandomMemory(memory_size=50000, num_envs=env.num_envs, device=device, replacement=False)
 
-    # -----------------
-    # PPO config
-    # -----------------
-    from skrl.agents.torch.ppo import PPO_DEFAULT_CONFIG
-    cfg = PPO_DEFAULT_CONFIG.copy()
-    cfg["learning_epochs"] = 4
-    cfg["mini_batches"] = 2
-    cfg["rollouts"] = 1024
-    cfg["write_interval"] = 1
-    cfg["checkpoint_interval"] = 0
-    cfg["save_models"] = False
+    models = {
+        "q_network": QNetwork(env.observation_space, env.action_space, device),
+        "target_q_network": QNetwork(env.observation_space, env.action_space, device)
+    }
 
-    # -----------------
-    # RED agent
-    # -----------------
-    policy_red = Policy(obs_space, act_space, device)
-    value_red = Value(obs_space, act_space, device)
-    memory_red = RandomMemory(memory_size=10000, num_envs=1, device=device)
-    models_red = {"policy": policy_red, "value": value_red}
+    for model in models.values():
+        model.init_parameters(method_name="normal_", mean=0.0, std=0.1)
 
-    agent_red = PPO(models=models_red, memory=memory_red, cfg=cfg,
-                    observation_space=obs_space, action_space=act_space, device=device)
+    cfg = DQN_DEFAULT_CONFIG.copy()
+    cfg["learning_starts"] = 10000
+    cfg["exploration"]["initial_epsilon"] = 1.0
+    cfg["exploration"]["final_epsilon"] = 0.05
+    cfg["exploration"]["timesteps"] = 50000
+    cfg["experiment"]["write_interval"] = 5000
+    cfg["experiment"]["checkpoint_interval"] = 10000
+    cfg["experiment"]["directory"] = "runs/torch/ALE_Pong"
 
-    # -----------------
-    # BLUE agent
-    # -----------------
-    policy_blue = Policy(obs_space, act_space, device)
-    value_blue = Value(obs_space, act_space, device)
-    memory_blue = RandomMemory(memory_size=10000, num_envs=1, device=device)
-    models_blue = {"policy": policy_blue, "value": value_blue}
+    agent = DQN(models=models, memory=memory, cfg=cfg,
+                observation_space=env.observation_space, action_space=env.action_space, device=device)
 
-    agent_blue = PPO(models=models_blue, memory=memory_blue, cfg=cfg,
-                     observation_space=obs_space, action_space=act_space, device=device)
+    # 4. Train the Agent
+    print("Starting Training...")
+    cfg_trainer = {"timesteps": 100000, "headless": True}
+    trainer = SequentialTrainer(cfg=cfg_trainer, env=env, agents=[agent])
+    trainer.train()
 
-    # -----------------
-    # Force numeric-safe attributes (_underscore)
-    # -----------------
-    for agent in [agent_red, agent_blue]:
-        # _write_interval
-        if isinstance(agent._write_interval, str) and agent._write_interval == "auto":
-            agent._write_interval = 1
-        elif isinstance(agent._write_interval, str):
-            agent._write_interval = int(agent._write_interval)
+    env.close()
 
-        # _checkpoint_interval
-        if isinstance(agent._checkpoint_interval, str) and agent._checkpoint_interval == "auto":
-            agent._checkpoint_interval = 0
-        elif isinstance(agent._checkpoint_interval, str):
-            agent._checkpoint_interval = int(agent._checkpoint_interval)
+    # 5. Record the Best Run
+    print("Training Complete. Recording Video...")
+    
+    # Create a fresh environment for recording high-res RGB frames
+    eval_env = gym.make("ALE/Pong-v5", render_mode="rgb_array", frameskip=1)
+    
+    # Wrap with RecordVideo FIRST so we capture the original colors and resolution
+    eval_env = RecordVideo(eval_env, video_folder="videos", name_prefix="pong-agent", episode_trigger=lambda x: True)
+    
+    # Apply the same preprocessing so the agent can understand the observation
+    eval_env = AtariPreprocessing(eval_env, screen_size=84, grayscale_obs=True, frame_skip=4)
+    eval_env = FrameStack(eval_env, 4)
+    eval_env = wrap_env(eval_env)
 
-        # Other numeric attributes
-        agent._learning_epochs = int(agent._learning_epochs)
-        agent._mini_batches = int(agent._mini_batches)
-        agent._rollouts = int(agent._rollouts)
+    agent.set_mode("eval")
+    obs, _ = eval_env.reset()
+    done = False
+    
+    # Run one full episode
+    while not done:
+        action, _, _ = agent.act(obs, timestep=0, timesteps=0)
+        obs, reward, terminated, truncated, _ = eval_env.step(action)
+        # Check if any environment is done
+        done = terminated.any() or truncated.any()
 
-    # -----------------
-    # Training loop
-    # -----------------
-    frames = []
-    timestep = 0
-    total_timesteps = 100000
+    eval_env.close()
+    print("Video recording complete. Saved to 'videos/' directory.")
 
-    for episode in range(100):
-        obs = env.reset()
-        done = False
-
-        while not done:
-            state = torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(device)
-
-            action_red = agent_red.act(state, timestep, total_timesteps)[0].detach().cpu().numpy()[0]
-            action_blue = agent_blue.act(state, timestep, total_timesteps)[0].detach().cpu().numpy()[0]
-
-            next_obs, reward_red, reward_blue, done = env.step(action_red, action_blue)
-            frame = env.render()
-            frames.append(frame)
-
-            next_state = torch.tensor(next_obs, dtype=torch.float32).unsqueeze(0).to(device)
-            done_tensor = torch.tensor([done], dtype=torch.bool).to(device)
-            truncated_tensor = torch.tensor([False], dtype=torch.bool).to(device)
-            infos = [{}]
-
-            # RED agent
-            agent_red.record_transition(
-                states=state,
-                actions=torch.tensor(action_red, dtype=torch.float32).unsqueeze(0).to(device),
-                rewards=torch.tensor([[reward_red]], dtype=torch.float32).to(device),
-                next_states=next_state,
-                terminated=done_tensor,
-                truncated=truncated_tensor,
-                infos=infos,
-                timestep=timestep,
-                timesteps=total_timesteps
-            )
-
-            # BLUE agent
-            agent_blue.record_transition(
-                states=state,
-                actions=torch.tensor(action_blue, dtype=torch.float32).unsqueeze(0).to(device),
-                rewards=torch.tensor([[reward_blue]], dtype=torch.float32).to(device),
-                next_states=next_state,
-                terminated=done_tensor,
-                truncated=truncated_tensor,
-                infos=infos,
-                timestep=timestep,
-                timesteps=total_timesteps
-            )
-
-            obs = next_obs
-            timestep += 1
-
-        # Update both agents at the end of the episode
-        agent_red.update()
-        agent_blue.update()
-        print(f"Episode {episode} done")
-
-    # Save training outputs
-    imageio.mimsave("training.mp4", frames, fps=30)
-    torch.save(policy_red.state_dict(), "red_agent.pkl")
-    torch.save(policy_blue.state_dict(), "blue_agent.pkl")
 if __name__ == "__main__":
-    train()
+    main()
