@@ -104,42 +104,56 @@ def train():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Using device:", device)
 
+    # -----------------
+    # Environment
+    # -----------------
     env = TagEnv()
     obs_space = 4
     act_space = 2
 
+    # -----------------
+    # Numeric-safe PPO config
+    # -----------------
+    cfg = PPO_DEFAULT_CONFIG.copy()
+    for k, v in cfg.items():
+        if isinstance(v, str):
+            try:
+                cfg[k] = int(v)
+            except ValueError:
+                try:
+                    cfg[k] = float(v)
+                except ValueError:
+                    pass
+
+    # Adjust some training parameters
+    cfg["learning_epochs"] = 4
+    cfg["mini_batches"] = 2
+    cfg["rollouts"] = 1024
+    cfg["write_interval"] = 1
+
+    # -----------------
     # RED agent
+    # -----------------
     policy_red = Policy(obs_space, act_space, device)
     value_red = Value(obs_space, act_space, device)
     memory_red = RandomMemory(memory_size=10000, num_envs=1, device=device)
     models_red = {"policy": policy_red, "value": value_red}
+    agent_red = PPO(models=models_red, memory=memory_red, cfg=cfg,
+                    observation_space=obs_space, action_space=act_space, device=device)
 
+    # -----------------
     # BLUE agent
+    # -----------------
     policy_blue = Policy(obs_space, act_space, device)
     value_blue = Value(obs_space, act_space, device)
     memory_blue = RandomMemory(memory_size=10000, num_envs=1, device=device)
     models_blue = {"policy": policy_blue, "value": value_blue}
-
-    cfg = PPO_DEFAULT_CONFIG.copy()
-
-# ensure critical numeric keys are integers/floats
-    for key in ["learning_epochs", "mini_batches", "rollouts", "write_interval"]:
-        if key in cfg:
-            cfg[key] = int(cfg[key])
-
-# optional: ensure other floats are floats
-    for key in ["lr", "clip_range", "value_loss_coeff"]:
-        if key in cfg:
-            cfg[key] = float(cfg[key])
-    cfg["learning_epochs"] = 4
-    cfg["mini_batches"] = 2
-    cfg["rollouts"] = 1024
-
-    agent_red = PPO(models=models_red, memory=memory_red, cfg=cfg,
-                    observation_space=obs_space, action_space=act_space, device=device)
     agent_blue = PPO(models=models_blue, memory=memory_blue, cfg=cfg,
                      observation_space=obs_space, action_space=act_space, device=device)
 
+    # -----------------
+    # Training loop
+    # -----------------
     frames = []
     timestep = 0
     total_timesteps = 100000
@@ -161,6 +175,7 @@ def train():
             truncated_tensor = torch.tensor([False], dtype=torch.bool).to(device)
             infos = [{}]
 
+            # RED
             agent_red.record_transition(
                 states=state,
                 actions=torch.tensor(action_red, dtype=torch.float32).unsqueeze(0).to(device),
@@ -173,6 +188,7 @@ def train():
                 timesteps=total_timesteps
             )
 
+            # BLUE
             agent_blue.record_transition(
                 states=state,
                 actions=torch.tensor(action_blue, dtype=torch.float32).unsqueeze(0).to(device),
@@ -188,14 +204,14 @@ def train():
             obs = next_obs
             timestep += 1
 
+        # Update agents at end of episode
         agent_red.update()
         agent_blue.update()
         print(f"Episode {episode} done")
 
+    # Save outputs
     imageio.mimsave("training.mp4", frames, fps=30)
     torch.save(policy_red.state_dict(), "red_agent.pkl")
     torch.save(policy_blue.state_dict(), "blue_agent.pkl")
-
-
 if __name__ == "__main__":
     train()
