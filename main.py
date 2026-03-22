@@ -82,12 +82,16 @@ class Policy(GaussianMixin, Model):
             torch.nn.Linear(64, 64),
             torch.nn.ReLU(),
             torch.nn.Linear(64, self.num_actions),
-            torch.nn.Tanh()  # keep actions in [-1, 1]
+            torch.nn.Tanh()
         )
 
-    def compute(self, inputs, role):
-        return self.net(inputs["states"]), {}
+        # Learnable log standard deviation
+        self.log_std = torch.nn.Parameter(torch.zeros(self.num_actions))
 
+    def compute(self, inputs, role):
+        mean = self.net(inputs["states"])
+        log_std = self.log_std.expand_as(mean)
+        return mean, log_std, {}
 
 class Value(DeterministicMixin, Model):
     def __init__(self, observation_space, action_space, device):
