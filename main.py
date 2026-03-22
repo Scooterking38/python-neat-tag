@@ -101,6 +101,9 @@ class Value(DeterministicMixin, Model):
 # Training
 # -----------------
 def train():
+    import torch
+    import imageio
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Using device:", device)
 
@@ -112,38 +115,18 @@ def train():
     act_space = 2
 
     # -----------------
-    # Numeric-safe PPO config
+    # PPO config
     # -----------------
-    cfg = PPO_DEFAULT_CONFIG.copy()
-    for k, v in cfg.items():
-        if isinstance(v, str):
-            try:
-                cfg[k] = int(v)
-            except ValueError:
-                try:
-                    cfg[k] = float(v)
-                except ValueError:
-                    pass
+    from skrl.agents.torch.ppo import PPO_DEFAULT_CONFIG
 
-    # Adjust some training parameters
+    cfg = PPO_DEFAULT_CONFIG.copy()
     cfg["learning_epochs"] = 4
     cfg["mini_batches"] = 2
     cfg["rollouts"] = 1024
     cfg["write_interval"] = 1
-    # Copy default config
-    cfg = PPO_DEFAULT_CONFIG.copy()
+    cfg["checkpoint_interval"] = 0
+    cfg["save_models"] = False
 
-# Explicitly override all numeric keys to proper types
-    cfg["learning_epochs"] = int(cfg.get("learning_epochs", 4))
-    cfg["mini_batches"] = int(cfg.get("mini_batches", 2))
-    cfg["rollouts"] = int(cfg.get("rollouts", 1024))
-    cfg["write_interval"] = int(cfg.get("write_interval", 1))
-    cfg["checkpoint_interval"] = int(cfg.get("checkpoint_interval", 0))
-    cfg["save_models"] = bool(cfg.get("save_models", False))
-    cfg["lr"] = float(cfg.get("lr", 0.0003))
-    cfg["clip_range"] = float(cfg.get("clip_range", 0.2))
-    cfg["value_loss_coeff"] = float(cfg.get("value_loss_coeff", 0.5))
-    cfg["entropy_loss_coeff"] = float(cfg.get("entropy_loss_coeff", 0.01))
     # -----------------
     # RED agent
     # -----------------
@@ -151,6 +134,7 @@ def train():
     value_red = Value(obs_space, act_space, device)
     memory_red = RandomMemory(memory_size=10000, num_envs=1, device=device)
     models_red = {"policy": policy_red, "value": value_red}
+
     agent_red = PPO(models=models_red, memory=memory_red, cfg=cfg,
                     observation_space=obs_space, action_space=act_space, device=device)
 
@@ -161,8 +145,19 @@ def train():
     value_blue = Value(obs_space, act_space, device)
     memory_blue = RandomMemory(memory_size=10000, num_envs=1, device=device)
     models_blue = {"policy": policy_blue, "value": value_blue}
+
     agent_blue = PPO(models=models_blue, memory=memory_blue, cfg=cfg,
                      observation_space=obs_space, action_space=act_space, device=device)
+
+    # -----------------
+    # Force numeric types on critical attributes (fix write_interval TypeError)
+    # -----------------
+    for agent in [agent_red, agent_blue]:
+        agent.write_interval = int(agent.write_interval)
+        agent.checkpoint_interval = int(agent.checkpoint_interval)
+        agent.learning_epochs = int(agent.learning_epochs)
+        agent.mini_batches = int(agent.mini_batches)
+        agent.rollouts = int(agent.rollouts)
 
     # -----------------
     # Training loop
@@ -174,8 +169,10 @@ def train():
     for episode in range(100):
         obs = env.reset()
         done = False
+
         while not done:
             state = torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(device)
+
             action_red = agent_red.act(state, timestep, total_timesteps)[0].detach().cpu().numpy()[0]
             action_blue = agent_blue.act(state, timestep, total_timesteps)[0].detach().cpu().numpy()[0]
 
@@ -188,7 +185,7 @@ def train():
             truncated_tensor = torch.tensor([False], dtype=torch.bool).to(device)
             infos = [{}]
 
-            # RED
+            # RED agent
             agent_red.record_transition(
                 states=state,
                 actions=torch.tensor(action_red, dtype=torch.float32).unsqueeze(0).to(device),
@@ -201,7 +198,7 @@ def train():
                 timesteps=total_timesteps
             )
 
-            # BLUE
+            # BLUE agent
             agent_blue.record_transition(
                 states=state,
                 actions=torch.tensor(action_blue, dtype=torch.float32).unsqueeze(0).to(device),
@@ -217,12 +214,12 @@ def train():
             obs = next_obs
             timestep += 1
 
-        # Update agents at end of episode
+        # Update both agents at the end of the episode
         agent_red.update()
         agent_blue.update()
         print(f"Episode {episode} done")
 
-    # Save outputs
+    # Save training artifacts
     imageio.mimsave("training.mp4", frames, fps=30)
     torch.save(policy_red.state_dict(), "red_agent.pkl")
     torch.save(policy_blue.state_dict(), "blue_agent.pkl")
