@@ -1,13 +1,13 @@
 import os
-os.environ["SDL_VIDEODRIVER"] = "dummy"  # Headless pygame
+os.environ["SDL_VIDEODRIVER"] = "dummy"
+os.environ["SDL_AUDIODRIVER"] = "dummy"
 
 import pygame
 import numpy as np
 import torch
 import imageio
-import pickle
 
-from skrl.models.torch import Model, GaussianMixin
+from skrl.models.torch import Model, GaussianMixin, DeterministicMixin
 from skrl.memories.torch import RandomMemory
 from skrl.agents.torch.ppo import PPO, PPO_DEFAULT_CONFIG
 
@@ -69,7 +69,7 @@ class TagEnv:
 
 
 # -----------------
-# Neural Network
+# Neural Networks
 # -----------------
 class Policy(GaussianMixin, Model):
     def __init__(self, observation_space, action_space, device):
@@ -88,6 +88,23 @@ class Policy(GaussianMixin, Model):
         return self.net(inputs["states"]), {}
 
 
+class Value(DeterministicMixin, Model):
+    def __init__(self, observation_space, action_space, device):
+        Model.__init__(self, observation_space, action_space, device)
+        DeterministicMixin.__init__(self)
+
+        self.net = torch.nn.Sequential(
+            torch.nn.Linear(self.num_observations, 64),
+            torch.nn.ReLU(),
+            torch.nn.Linear(64, 64),
+            torch.nn.ReLU(),
+            torch.nn.Linear(64, 1)
+        )
+
+    def compute(self, inputs, role):
+        return self.net(inputs["states"]), {}
+
+
 # -----------------
 # Training
 # -----------------
@@ -100,20 +117,26 @@ def train():
     observation_space = 4
     action_space = 2
 
+    # RED AGENT
     policy_red = Policy(observation_space, action_space, device)
-    policy_blue = Policy(observation_space, action_space, device)
-
+    value_red = Value(observation_space, action_space, device)
     memory_red = RandomMemory(memory_size=10000, num_envs=1, device=device)
+    models_red = {"policy": policy_red, "value": value_red}
+
+    # BLUE AGENT
+    policy_blue = Policy(observation_space, action_space, device)
+    value_blue = Value(observation_space, action_space, device)
     memory_blue = RandomMemory(memory_size=10000, num_envs=1, device=device)
+    models_blue = {"policy": policy_blue, "value": value_blue}
 
     cfg = PPO_DEFAULT_CONFIG.copy()
     cfg["learning_epochs"] = 4
     cfg["mini_batches"] = 2
 
-    agent_red = PPO(models=policy_red, memory=memory_red, cfg=cfg,
+    agent_red = PPO(models=models_red, memory=memory_red, cfg=cfg,
                     observation_space=observation_space, action_space=action_space, device=device)
 
-    agent_blue = PPO(models=policy_blue, memory=memory_blue, cfg=cfg,
+    agent_blue = PPO(models=models_blue, memory=memory_blue, cfg=cfg,
                      observation_space=observation_space, action_space=action_space, device=device)
 
     frames = []
@@ -145,11 +168,8 @@ def train():
 
     imageio.mimsave("training.mp4", frames, fps=30)
 
-    with open("red_agent.pkl", "wb") as f:
-        pickle.dump(policy_red.state_dict(), f)
-
-    with open("blue_agent.pkl", "wb") as f:
-        pickle.dump(policy_blue.state_dict(), f)
+    torch.save(policy_red.state_dict(), "red_agent.pkl")
+    torch.save(policy_blue.state_dict(), "blue_agent.pkl")
 
 
 if __name__ == "__main__":
