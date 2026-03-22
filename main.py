@@ -156,8 +156,8 @@ def train():
         while not done:
             state = torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(device)
 
-            action_red = agent_red.act(state, timestep, total_timesteps)[0].cpu().numpy()[0]
-            action_blue = agent_blue.act(state, timestep, total_timesteps)[0].cpu().numpy()[0]
+            action_red = agent_red.act(state, timestep, total_timesteps)[0].detach().cpu().numpy()[0]
+            action_blue = agent_blue.act(state, timestep, total_timesteps)[0].detach().cpu().numpy()[0]
 
             next_obs, reward_red, reward_blue, done = env.step(action_red, action_blue)
 
