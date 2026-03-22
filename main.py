@@ -81,7 +81,8 @@ class Policy(GaussianMixin, Model):
             torch.nn.ReLU(),
             torch.nn.Linear(64, 64),
             torch.nn.ReLU(),
-            torch.nn.Linear(64, self.num_actions)
+            torch.nn.Linear(64, self.num_actions),
+            torch.nn.Tanh()  # keep actions in [-1, 1]
         )
 
     def compute(self, inputs, role):
@@ -117,13 +118,13 @@ def train():
     observation_space = 4
     action_space = 2
 
-    # RED AGENT
+    # RED
     policy_red = Policy(observation_space, action_space, device)
     value_red = Value(observation_space, action_space, device)
     memory_red = RandomMemory(memory_size=10000, num_envs=1, device=device)
     models_red = {"policy": policy_red, "value": value_red}
 
-    # BLUE AGENT
+    # BLUE
     policy_blue = Policy(observation_space, action_space, device)
     value_blue = Value(observation_space, action_space, device)
     memory_blue = RandomMemory(memory_size=10000, num_envs=1, device=device)
@@ -132,6 +133,7 @@ def train():
     cfg = PPO_DEFAULT_CONFIG.copy()
     cfg["learning_epochs"] = 4
     cfg["mini_batches"] = 2
+    cfg["rollouts"] = 1024
 
     agent_red = PPO(models=models_red, memory=memory_red, cfg=cfg,
                     observation_space=observation_space, action_space=action_space, device=device)
@@ -140,6 +142,8 @@ def train():
                      observation_space=observation_space, action_space=action_space, device=device)
 
     frames = []
+    timestep = 0
+    total_timesteps = 100000
 
     for episode in range(100):
         obs = env.reset()
@@ -148,8 +152,8 @@ def train():
         while not done:
             state = torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(device)
 
-            action_red = agent_red.act(state)[0].cpu().numpy()[0]
-            action_blue = agent_blue.act(state)[0].cpu().numpy()[0]
+            action_red = agent_red.act(state, timestep, total_timesteps)[0].cpu().numpy()[0]
+            action_blue = agent_blue.act(state, timestep, total_timesteps)[0].cpu().numpy()[0]
 
             next_obs, reward_red, reward_blue, done = env.step(action_red, action_blue)
 
@@ -160,6 +164,7 @@ def train():
             agent_blue.record_transition(state, action_blue, reward_blue, next_obs, done)
 
             obs = next_obs
+            timestep += 1
 
         agent_red.update()
         agent_blue.update()
