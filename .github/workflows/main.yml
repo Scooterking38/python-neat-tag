@@ -1,9 +1,6 @@
-name: SB3 Pong Train and Record
+name: SB3 Pong Fix
 
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
+on: [push, workflow_dispatch]
 
 jobs:
   run-rl:
@@ -17,22 +14,23 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install System Dependencies
+      - name: Install Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb ffmpeg
-
-      - name: Install RL Dependencies
-        run: |
           pip install "gymnasium[atari,accept-rom-license]"
-          pip install stable-baselines3 shimmy opencv-python-headless ale-py
+          pip install stable-baselines3[extra] shimmy opencv-python-headless ale-py
 
       - name: Run Script
+        # xvfb-run -a handles the virtual display automatically
         run: |
           xvfb-run -a python main.py
 
-      - name: Upload Video
+      - name: Upload Videos
+        if: always() # Upload even if the script failed
         uses: actions/upload-artifact@v4
         with:
-          name: pong-video
-          path: videos/
+          name: output-files
+          path: |
+            videos/
+            *.zip
