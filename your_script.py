@@ -102,7 +102,21 @@ else:
     env = gym.make_vec(env_id, num_envs=args.num_envs, render_mode=render_mode, vectorization_mode="sync")
 # wrap the environment
 env = wrap_env(env)
+def eval_with_video(agent, env, video_path="runs/torch/Pendulum/best_run"):
+    """Evaluate agent headlessly and record a video of one episode."""
+    import gymnasium as gym
+    from gymnasium.wrappers import RecordVideo
 
+    # Wrap environment with video recorder
+    env_video = RecordVideo(env.unwrapped if hasattr(env, "unwrapped") else env,
+                            video_folder=video_path,
+                            episode_trigger=lambda e: True)  # record all episodes (or modify to best)
+    env_video = wrap_env(env_video)  # SKRL wrapper
+
+    trainer_eval_cfg = {"timesteps": 0, "headless": True}
+    from skrl.trainers.torch import SequentialTrainer
+    trainer = SequentialTrainer(cfg=trainer_eval_cfg, env=env_video, agents=agent)
+    trainer.eval()
 device = env.device
 
 
@@ -164,5 +178,7 @@ if args.checkpoint:
         logger.error(f"Checkpoint file not found: '{args.checkpoint}'")
         exit(1)
     agent.load(args.checkpoint)
-
-trainer.train() if not args.eval else trainer.eval()
+if args.eval:
+    eval_with_video(agent, env)
+else:
+    trainer.train()
