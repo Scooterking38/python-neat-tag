@@ -151,16 +151,16 @@ def train():
                 states=state,
                 actions=torch.tensor(action_red, dtype=torch.float32).unsqueeze(0).to(device),
                 rewards=torch.tensor([[reward_red]], dtype=torch.float32).to(device),
-                next_states=next_state,
-                role="policy"
+                next_states=next_state
+                
             )
 
             agent_blue.record_transition(
                 states=state,
                 actions=torch.tensor(action_blue, dtype=torch.float32).unsqueeze(0).to(device),
                 rewards=torch.tensor([[reward_blue]], dtype=torch.float32).to(device),
-                next_states=next_state,
-                role="policy"
+                next_states=next_state
+                
             )
 
             obs = next_obs
