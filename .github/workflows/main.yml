@@ -14,13 +14,19 @@ jobs:
       with:
         python-version: '3.11'
 
+    - name: Cache pip packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
     - name: Install dependencies
       run: |
-        pip install torch
-        pip install skrl
-        pip install pygame
-        pip install imageio
-        pip install numpy
+        python -m pip install --upgrade pip
+        pip install torch --index-url https://download.pytorch.org/whl/cpu
+        pip install skrl pygame imageio numpy
 
     - name: Run training
       run: python main.py
