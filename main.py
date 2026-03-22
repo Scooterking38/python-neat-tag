@@ -121,6 +121,16 @@ def train():
     models_blue = {"policy": policy_blue, "value": value_blue}
 
     cfg = PPO_DEFAULT_CONFIG.copy()
+
+# ensure critical numeric keys are integers/floats
+    for key in ["learning_epochs", "mini_batches", "rollouts", "write_interval"]:
+        if key in cfg:
+            cfg[key] = int(cfg[key])
+
+# optional: ensure other floats are floats
+    for key in ["lr", "clip_range", "value_loss_coeff"]:
+        if key in cfg:
+            cfg[key] = float(cfg[key])
     cfg["learning_epochs"] = 4
     cfg["mini_batches"] = 2
     cfg["rollouts"] = 1024
