@@ -1,40 +1,41 @@
-name: Train Tag AI
+name: Run RL and Upload Video
 
-on: [push]
+on:
+  workflow_dispatch:
 
 jobs:
-  train:
+  run-rl:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v3
 
-    - name: Setup Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
 
-    - name: Cache pip packages
-      uses: actions/cache@v4
-      with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch gymnasium skrl[all] numpy opencv-python
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install torch --index-url https://download.pytorch.org/whl/cpu
-        pip install skrl pygame imageio numpy
+      - name: Create output directory
+        run: mkdir -p videos
 
-    - name: Run training
-      run: python main.py
+      - name: Run RL evaluation headlessly
+        run: |
+          python your_script.py --headless --eval
+        env:
+          CUDA_VISIBLE_DEVICES: ""  # force CPU
 
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: trained-agents
-        path: |
-          *.pkl
-          *.mp4
+      - name: Package video
+        run: |
+          cp -r runs/torch/Pendulum/best_run videos/
+
+      - name: Upload video artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: best-run-video
+          path: videos/
