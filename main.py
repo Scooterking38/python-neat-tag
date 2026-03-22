@@ -130,7 +130,20 @@ def train():
     cfg["mini_batches"] = 2
     cfg["rollouts"] = 1024
     cfg["write_interval"] = 1
+    # Copy default config
+    cfg = PPO_DEFAULT_CONFIG.copy()
 
+# Explicitly override all numeric keys to proper types
+    cfg["learning_epochs"] = int(cfg.get("learning_epochs", 4))
+    cfg["mini_batches"] = int(cfg.get("mini_batches", 2))
+    cfg["rollouts"] = int(cfg.get("rollouts", 1024))
+    cfg["write_interval"] = int(cfg.get("write_interval", 1))
+    cfg["checkpoint_interval"] = int(cfg.get("checkpoint_interval", 0))
+    cfg["save_models"] = bool(cfg.get("save_models", False))
+    cfg["lr"] = float(cfg.get("lr", 0.0003))
+    cfg["clip_range"] = float(cfg.get("clip_range", 0.2))
+    cfg["value_loss_coeff"] = float(cfg.get("value_loss_coeff", 0.5))
+    cfg["entropy_loss_coeff"] = float(cfg.get("entropy_loss_coeff", 0.01))
     # -----------------
     # RED agent
     # -----------------
