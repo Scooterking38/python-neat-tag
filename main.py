@@ -73,7 +73,7 @@ class Policy(GaussianMixin, Model):
             torch.nn.Linear(64, 64),
             torch.nn.ReLU(),
             torch.nn.Linear(64, self.num_actions),
-            torch.nn.Tanh()  # action in [-1,1]
+            torch.nn.Tanh()
         )
         self.log_std = torch.nn.Parameter(torch.zeros(self.num_actions))
 
@@ -145,22 +145,34 @@ def train():
             next_obs, reward_red, reward_blue, done = env.step(action_red, action_blue)
             frame = env.render()
             frames.append(frame)
+
             next_state = torch.tensor(next_obs, dtype=torch.float32).unsqueeze(0).to(device)
+            done_tensor = torch.tensor([done], dtype=torch.bool).to(device)
+            truncated_tensor = torch.tensor([False], dtype=torch.bool).to(device)
+            infos = [{}]
 
             agent_red.record_transition(
                 states=state,
                 actions=torch.tensor(action_red, dtype=torch.float32).unsqueeze(0).to(device),
                 rewards=torch.tensor([[reward_red]], dtype=torch.float32).to(device),
-                next_states=next_state
-                
+                next_states=next_state,
+                terminated=done_tensor,
+                truncated=truncated_tensor,
+                infos=infos,
+                timestep=timestep,
+                timesteps=total_timesteps
             )
 
             agent_blue.record_transition(
                 states=state,
                 actions=torch.tensor(action_blue, dtype=torch.float32).unsqueeze(0).to(device),
                 rewards=torch.tensor([[reward_blue]], dtype=torch.float32).to(device),
-                next_states=next_state
-                
+                next_states=next_state,
+                terminated=done_tensor,
+                truncated=truncated_tensor,
+                infos=infos,
+                timestep=timestep,
+                timesteps=total_timesteps
             )
 
             obs = next_obs
@@ -173,6 +185,7 @@ def train():
     imageio.mimsave("training.mp4", frames, fps=30)
     torch.save(policy_red.state_dict(), "red_agent.pkl")
     torch.save(policy_blue.state_dict(), "blue_agent.pkl")
+
 
 if __name__ == "__main__":
     train()
